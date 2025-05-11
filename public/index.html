@@ -1,0 +1,2673 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no"
+    />
+    <title>Muslim Stints - Short-term Job Portal</title>
+
+    <!-- Firebase SDK -->
+    <script type="module">
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
+      import {
+        getAuth,
+        onAuthStateChanged,
+        createUserWithEmailAndPassword,
+        signInWithEmailAndPassword,
+        signOut,
+      } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-auth.js";
+      import {
+        getFirestore,
+        doc,
+        setDoc,
+        getDoc,
+        collection,
+        addDoc,
+        query,
+        where,
+        getDocs,
+        orderBy,
+      } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore.js";
+      import {
+        getStorage,
+        ref,
+        uploadBytesResumable,
+        getDownloadURL,
+      } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-storage.js";
+
+      const firebaseConfig = {
+        apiKey: "AIzaSyBAasFIFGcPq1p205G36yVoTd9-UqMMLwk",
+        authDomain: "muslimstints.firebaseapp.com",
+        projectId: "muslimstints",
+        storageBucket: "muslimstints.appspot.com",
+        messagingSenderId: "732662707541",
+        appId: "1:732662707541:web:8a6865417857dd752febdc",
+      };
+
+      const app = initializeApp(firebaseConfig);
+      const auth = getAuth(app);
+      const db = getFirestore(app);
+      const storage = getStorage(app);
+
+      // Initialize Petite Vue application
+      const appInstance = PetiteVue.createApp({
+        // Theme state
+        darkMode: localStorage.getItem("darkMode") === "true" || false,
+
+        // Auth state
+        user: null,
+        userProfile: null,
+        email: "",
+        password: "",
+        confirmPassword: "",
+        isSignUp: false,
+        accountType: "jobseeker", // "jobseeker" or "business"
+        loginError: "",
+        signUpError: "",
+
+        // UI state
+        activeTab: "profile", // "profile", "stints", "applications"
+        loading: false,
+
+        // Profile data (simplified)
+        profile: {
+          fullName: "",
+          phone: "",
+          cvUrl: "",
+        },
+
+        // CV upload
+        cvFile: null,
+        uploadProgress: 0,
+        isUploading: false,
+
+        // Business data
+        business: {
+          companyName: "",
+          industry: "",
+          location: "",
+          description: "",
+          website: "",
+          contactEmail: "",
+          contactPhone: "",
+          verified: false,
+          verificationRequested: false,
+        },
+
+        // Admin state
+        isAdmin: false,
+        pendingBusinesses: [],
+
+        // Stint posting data
+        newStint: {
+          title: "",
+          description: "",
+          requirements: "",
+          location: "",
+          payment: "",
+          duration: "",
+          startDate: "",
+        },
+
+        // Stints list
+        stints: [],
+
+        // Applications
+        applications: [],
+
+        // Add these properties to your app instance
+        isMobileApp: false,
+        statusBarHeight: 0,
+
+        // Add these properties to your app instance
+        isOnline: true,
+
+        // Add this method to your app instance
+        setupOfflineDetection() {
+          // Check initial state
+          this.isOnline = navigator.onLine;
+
+          // Listen for online/offline events
+          window.addEventListener("online", () => {
+            this.isOnline = true;
+            this.showToast("You are back online", "success");
+            // Sync any pending data
+            this.syncPendingData();
+          });
+
+          window.addEventListener("offline", () => {
+            this.isOnline = false;
+            this.showToast(
+              "You are offline. Some features may be limited.",
+              "warning"
+            );
+          });
+        },
+
+        // Add this method to sync data when back online
+        syncPendingData() {
+          // Implement logic to sync any data that was created while offline
+          // This would use IndexedDB or localStorage to store pending changes
+        },
+
+        // Add this method to your app instance
+        initMobileApp() {
+          // Check if running in Capacitor
+          if (window.Capacitor && window.Capacitor.isNative) {
+            this.isMobileApp = true;
+
+            // Handle status bar (iOS)
+            if (window.Capacitor.Plugins.StatusBar) {
+              window.Capacitor.Plugins.StatusBar.setStyle({ style: "DARK" });
+
+              // Get status bar height for iOS
+              if (window.Capacitor.getPlatform() === "ios") {
+                window.Capacitor.Plugins.StatusBar.getInfo().then((info) => {
+                  this.statusBarHeight = info.height;
+                  document.documentElement.style.setProperty(
+                    "--status-bar-height",
+                    `${info.height}px`
+                  );
+                });
+              }
+            }
+
+            // Handle keyboard adjustments
+            if (window.Capacitor.Plugins.Keyboard) {
+              window.Capacitor.Plugins.Keyboard.addListener(
+                "keyboardWillShow",
+                (info) => {
+                  // Adjust view when keyboard appears
+                  document.body.classList.add("keyboard-open");
+                  document.body.style.height = `calc(100% - ${info.keyboardHeight}px)`;
+                }
+              );
+
+              window.Capacitor.Plugins.Keyboard.addListener(
+                "keyboardWillHide",
+                () => {
+                  // Reset view when keyboard hides
+                  document.body.classList.remove("keyboard-open");
+                  document.body.style.height = "100%";
+                }
+              );
+            }
+          }
+        },
+
+        // Modify your init() method to call initMobileApp
+        init() {
+          // Set initial theme
+          this.applyTheme();
+
+          // Initialize mobile app features
+          this.initMobileApp();
+
+          // Setup offline detection
+          this.setupOfflineDetection();
+
+          // In the init() method, update the onAuthStateChanged handler with better error handling
+          onAuthStateChanged(auth, async (user) => {
+            console.log("Auth state changed, user:", user);
+            this.user = user;
+
+            if (user) {
+              try {
+                // Check if user has a profile
+                await this.fetchUserData();
+                console.log(
+                  "User data fetched, account type:",
+                  this.accountType
+                );
+
+                // Check if user is admin
+                await this.checkAdminStatus();
+                console.log("Admin status checked:", this.isAdmin);
+
+                // If business account, fetch job postings
+                if (this.accountType === "business") {
+                  await this.fetchBusinessStints();
+                  console.log("Business stints fetched");
+                } else {
+                  // For job seekers, fetch all stints
+                  await this.fetchAllStints();
+                  console.log("All stints fetched for job seeker");
+                }
+
+                // If admin, fetch pending businesses
+                if (this.isAdmin) {
+                  await this.fetchPendingBusinesses();
+                  console.log("Pending businesses fetched for admin");
+                }
+              } catch (error) {
+                console.error("Error during initialization:", error);
+                this.showToast("Error loading data: " + error.message, "error");
+              }
+            } else {
+              // Reset state when user logs out
+              this.userProfile = null;
+              this.accountType = "jobseeker";
+              this.stints = [];
+              this.applications = [];
+              this.isAdmin = false;
+              this.pendingBusinesses = [];
+            }
+          });
+        },
+
+        // Toggle dark mode
+        toggleDarkMode() {
+          this.darkMode = !this.darkMode;
+          localStorage.setItem("darkMode", this.darkMode);
+          this.applyTheme();
+        },
+
+        // Apply theme to document
+        applyTheme() {
+          if (this.darkMode) {
+            document.documentElement.classList.add("dark-mode");
+          } else {
+            document.documentElement.classList.remove("dark-mode");
+          }
+        },
+
+        // Login method with better logging
+        async loginUser() {
+          this.loginError = "";
+          this.loading = true;
+
+          try {
+            console.log("Attempting login with email:", this.email);
+            const userCredential = await signInWithEmailAndPassword(
+              auth,
+              this.email,
+              this.password
+            );
+            this.user = userCredential.user;
+            console.log("Login successful, user ID:", userCredential.user.uid);
+            this.showToast("Login successful!", "success");
+          } catch (error) {
+            console.error("Login failed:", error);
+            this.loginError = error.message;
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Sign-up method with improved error handling and verification
+        async signUpUser() {
+          this.signUpError = "";
+          this.loading = true;
+
+          if (this.password !== this.confirmPassword) {
+            this.signUpError = "Passwords do not match!";
+            this.loading = false;
+            return;
+          }
+
+          try {
+            console.log(
+              "Starting sign up process for account type:",
+              this.accountType
+            );
+
+            // 1. Create Firebase Auth user
+            const userCredential = await createUserWithEmailAndPassword(
+              auth,
+              this.email,
+              this.password
+            );
+
+            console.log("Firebase Auth user created:", userCredential.user.uid);
+            this.user = userCredential.user;
+
+            // 2. Prepare user data
+            const userData = {
+              uid: userCredential.user.uid,
+              email: userCredential.user.email || "",
+              accountType: this.accountType,
+              createdAt: new Date().toISOString(),
+            };
+
+            // 3. Add verification fields for business accounts
+            if (this.accountType === "business") {
+              userData.verified = false;
+              userData.verificationRequested = false;
+              userData.companyName = ""; // Add default values
+              userData.contactEmail = this.email;
+            }
+
+            // 4. Determine collection name
+            const collectionName =
+              this.accountType === "business" ? "businesses" : "users";
+            console.log(`Saving user data to ${collectionName} collection`);
+
+            // 5. Save to Firestore with explicit error handling
+            try {
+              await setDoc(
+                doc(db, collectionName, userCredential.user.uid),
+                userData
+              );
+              console.log(`User data saved to ${collectionName} collection`);
+
+              // 6. Verify data was saved by reading it back
+              const docRef = doc(db, collectionName, userCredential.user.uid);
+              const docSnap = await getDoc(docRef);
+
+              if (docSnap.exists()) {
+                console.log("Verified data was saved:", docSnap.data());
+
+                // 7. Initialize the appropriate profile object
+                if (this.accountType === "business") {
+                  this.business = {
+                    ...this.business,
+                    ...userData,
+                  };
+                  console.log("Business object initialized:", this.business);
+                } else {
+                  this.profile = {
+                    ...this.profile,
+                    ...userData,
+                  };
+                  console.log("Profile object initialized:", this.profile);
+                }
+
+                this.userProfile = userData;
+                this.showToast("Account created successfully!", "success");
+              } else {
+                console.error(
+                  "Data was not saved correctly - document doesn't exist"
+                );
+                this.showToast(
+                  "Error creating account: Data not saved",
+                  "error"
+                );
+              }
+            } catch (firestoreError) {
+              console.error("Firestore error:", firestoreError);
+              this.signUpError =
+                "Error saving profile: " + firestoreError.message;
+              this.showToast("Error saving profile data", "error");
+            }
+          } catch (authError) {
+            console.error("Auth error:", authError);
+            this.signUpError = authError.message;
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Logout method
+        async logoutUser() {
+          try {
+            await signOut(auth);
+            this.user = null;
+            this.userProfile = null;
+            this.stints = [];
+            this.applications = [];
+            this.isAdmin = false;
+            this.pendingBusinesses = [];
+          } catch (error) {
+            console.error("Logout failed:", error.message);
+          }
+        },
+
+        // Check if user is admin
+        async checkAdminStatus() {
+          if (!this.user) {
+            this.isAdmin = false;
+            return;
+          }
+
+          try {
+            const adminRef = doc(db, "admins", this.user.uid);
+            const adminDoc = await getDoc(adminRef);
+            this.isAdmin = adminDoc.exists();
+          } catch (error) {
+            console.error("Error checking admin status:", error);
+            this.isAdmin = false;
+          }
+        },
+
+        // Fetch pending business verifications (admin only)
+        async fetchPendingBusinesses() {
+          if (!this.isAdmin) return;
+
+          try {
+            const q = query(
+              collection(db, "businesses"),
+              where("verificationRequested", "==", true),
+              where("verified", "==", false)
+            );
+
+            const querySnapshot = await getDocs(q);
+            this.pendingBusinesses = [];
+
+            querySnapshot.forEach((doc) => {
+              this.pendingBusinesses.push({
+                id: doc.id,
+                ...doc.data(),
+              });
+            });
+          } catch (error) {
+            console.error("Error fetching pending businesses:", error);
+          }
+        },
+
+        // Verify a business (admin only)
+        async verifyBusiness(businessId) {
+          if (!this.isAdmin) return;
+
+          this.loading = true;
+          try {
+            await setDoc(
+              doc(db, "businesses", businessId),
+              {
+                verified: true,
+              },
+              { merge: true }
+            );
+
+            this.showToast("Business verified successfully!", "success");
+            await this.fetchPendingBusinesses();
+          } catch (error) {
+            console.error("Error verifying business:", error);
+            this.showToast(
+              "Error verifying business: " + error.message,
+              "error"
+            );
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Request verification (for businesses)
+        async requestVerification() {
+          if (this.accountType !== "business") return;
+
+          this.loading = true;
+          try {
+            await setDoc(
+              doc(db, "businesses", this.user.uid),
+              {
+                verificationRequested: true,
+              },
+              { merge: true }
+            );
+
+            this.business.verificationRequested = true;
+            this.showToast("Verification requested successfully!", "success");
+          } catch (error) {
+            console.error("Error requesting verification:", error);
+            this.showToast(
+              "Error requesting verification: " + error.message,
+              "error"
+            );
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Fetch user data from Firestore with better error handling and null checks
+        async fetchUserData() {
+          if (!this.user) {
+            console.error("Cannot fetch user data: User is null");
+            return;
+          }
+
+          console.log("Fetching user data for:", this.user.uid);
+          try {
+            // First check if user exists in businesses collection
+            let docRef = doc(db, "businesses", this.user.uid);
+            let docSnap = await getDoc(docRef);
+
+            if (docSnap.exists()) {
+              console.log("Found business profile:", docSnap.data());
+              this.userProfile = docSnap.data();
+              this.accountType = "business";
+
+              // Populate business form data
+              this.business = {
+                ...this.business,
+                ...docSnap.data(),
+                uid: this.user.uid, // Ensure UID is set
+                verified: docSnap.data().verified || false,
+                verificationRequested:
+                  docSnap.data().verificationRequested || false,
+              };
+              console.log("Business profile loaded:", this.business);
+
+              // Check if verification banner should be shown
+              if (!this.business.verified) {
+                console.log(
+                  "Business is not verified, should show verification banner"
+                );
+              }
+
+              return;
+            } else {
+              console.log(
+                "No business profile found, checking users collection"
+              );
+            }
+
+            // If not in businesses, check users collection
+            docRef = doc(db, "users", this.user.uid);
+            docSnap = await getDoc(docRef);
+
+            if (docSnap.exists()) {
+              console.log("Found user profile:", docSnap.data());
+              this.userProfile = docSnap.data();
+              this.accountType = "jobseeker";
+
+              // Populate user form data
+              this.profile = { ...this.profile, ...docSnap.data() };
+              console.log("User profile loaded:", this.profile);
+              return;
+            } else {
+              console.log("No user profile found either");
+            }
+
+            // If no profile exists in either collection, create a new one
+            console.log(
+              "No profile found, creating new profile with account type: jobseeker"
+            );
+            const userData = {
+              uid: this.user.uid,
+              email: this.user.email || "",
+              accountType: "jobseeker", // Default to jobseeker if no profile found
+              createdAt: new Date().toISOString(),
+            };
+
+            await setDoc(doc(db, "users", this.user.uid), userData);
+            this.userProfile = userData;
+            this.accountType = "jobseeker";
+            this.profile = { ...this.profile, ...userData };
+            console.log("Created new jobseeker profile");
+          } catch (error) {
+            console.error("Error fetching user data:", error);
+            this.showToast("Error loading profile: " + error.message, "error");
+          }
+        },
+
+        // Handle CV file selection
+        handleFileSelect(event) {
+          const file = event.target.files[0];
+          if (file) {
+            this.cvFile = file;
+          }
+        },
+
+        // Upload CV to Firebase Storage
+        async uploadCV() {
+          if (!this.cvFile) {
+            this.showToast("Please select a CV file first", "error");
+            return;
+          }
+
+          if (!this.user) {
+            this.showToast("You must be logged in to upload a CV", "error");
+            return;
+          }
+
+          this.isUploading = true;
+          this.uploadProgress = 0;
+
+          try {
+            // Create a storage reference
+            const storageRef = ref(
+              storage,
+              `cvs/${this.user.uid}/${this.cvFile.name}`
+            );
+
+            // Upload file
+            const uploadTask = uploadBytesResumable(storageRef, this.cvFile);
+
+            // Monitor upload progress
+            uploadTask.on(
+              "state_changed",
+              (snapshot) => {
+                // Track progress
+                const progress =
+                  (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+                this.uploadProgress = Math.round(progress);
+              },
+              (error) => {
+                // Handle errors
+                console.error("Upload failed:", error);
+                this.showToast("Upload failed: " + error.message, "error");
+                this.isUploading = false;
+              },
+              async () => {
+                // Upload completed successfully
+                const downloadURL = await getDownloadURL(
+                  uploadTask.snapshot.ref
+                );
+                this.profile.cvUrl = downloadURL;
+                this.isUploading = false;
+
+                // Save the profile with the CV URL
+                await this.saveUserProfile();
+              }
+            );
+          } catch (error) {
+            console.error("Error uploading CV:", error);
+            this.showToast("Error uploading CV: " + error.message, "error");
+            this.isUploading = false;
+          }
+        },
+
+        // Save user profile
+        async saveUserProfile() {
+          if (!this.user) {
+            this.showToast(
+              "You must be logged in to save your profile",
+              "error"
+            );
+            return;
+          }
+
+          this.loading = true;
+          try {
+            const userData = {
+              ...this.profile,
+              uid: this.user.uid,
+              email: this.user.email || "",
+              accountType: "jobseeker",
+              updatedAt: new Date().toISOString(),
+            };
+
+            await setDoc(doc(db, "users", this.user.uid), userData);
+            this.userProfile = userData;
+            this.showToast("Profile saved successfully!", "success");
+          } catch (error) {
+            console.error("Error saving profile:", error);
+            this.showToast("Error saving profile: " + error.message, "error");
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Save business profile with null checks
+        async saveBusinessProfile() {
+          if (!this.user) {
+            this.showToast(
+              "You must be logged in to save your profile",
+              "error"
+            );
+            return;
+          }
+
+          this.loading = true;
+          try {
+            const businessData = {
+              ...this.business,
+              uid: this.user.uid,
+              email: this.user.email || "", // Add null check
+              accountType: "business",
+              updatedAt: new Date().toISOString(),
+            };
+
+            // Don't overwrite verification status
+            delete businessData.verified;
+
+            await setDoc(doc(db, "businesses", this.user.uid), businessData, {
+              merge: true,
+            });
+            this.userProfile = { ...this.userProfile, ...businessData };
+            this.showToast("Business profile saved successfully!", "success");
+          } catch (error) {
+            console.error("Error saving business profile:", error);
+            this.showToast(
+              "Error saving business profile: " + error.message,
+              "error"
+            );
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Post a new stint
+        async postStint() {
+          if (!this.user) {
+            this.showToast("You must be logged in to post a stint", "error");
+            return;
+          }
+
+          // Check if business is verified
+          if (!this.business.verified) {
+            this.showToast(
+              "Your business must be verified before posting stints",
+              "warning"
+            );
+            return;
+          }
+
+          this.loading = true;
+          try {
+            const stintData = {
+              ...this.newStint,
+              businessId: this.user.uid,
+              businessName: this.business.companyName || "Unknown Company",
+              postedAt: new Date().toISOString(),
+              status: "active",
+              type: "stint", // Mark as a stint
+            };
+
+            const docRef = await addDoc(collection(db, "stints"), stintData);
+
+            // Reset form
+            this.newStint = {
+              title: "",
+              description: "",
+              requirements: "",
+              location: "",
+              payment: "",
+              duration: "",
+              startDate: "",
+            };
+
+            this.showToast("Stint posted successfully!", "success");
+            await this.fetchBusinessStints();
+          } catch (error) {
+            console.error("Error posting stint:", error);
+            this.showToast("Error posting stint: " + error.message, "error");
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Fetch stints posted by this business
+        async fetchBusinessStints() {
+          if (!this.user || this.accountType !== "business") {
+            console.error(
+              "Cannot fetch business stints: User is not logged in or not a business"
+            );
+            return;
+          }
+
+          this.loading = true;
+          try {
+            const q = query(
+              collection(db, "stints"),
+              where("businessId", "==", this.user.uid),
+              orderBy("postedAt", "desc")
+            );
+
+            const querySnapshot = await getDocs(q);
+            this.stints = [];
+
+            querySnapshot.forEach((doc) => {
+              this.stints.push({
+                id: doc.id,
+                ...doc.data(),
+              });
+            });
+            console.log(
+              "Successfully fetched business stints:",
+              this.stints.length
+            );
+          } catch (error) {
+            console.error("Error fetching business stints:", error);
+
+            // If it's a permissions error, show a more helpful message
+            if (error.message.includes("permission")) {
+              this.showToast(
+                "Permission denied. Please check Firestore rules.",
+                "error"
+              );
+            } else {
+              this.showToast(
+                "Error fetching stints: " + error.message,
+                "error"
+              );
+            }
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Fetch all stints for job seekers with improved error handling
+        async fetchAllStints() {
+          if (!this.user || this.accountType !== "jobseeker") {
+            console.error(
+              "Cannot fetch stints: User is not logged in or not a jobseeker"
+            );
+            return;
+          }
+
+          this.loading = true;
+          try {
+            const q = query(
+              collection(db, "stints"),
+              where("status", "==", "active"),
+              orderBy("postedAt", "desc")
+            );
+
+            const querySnapshot = await getDocs(q);
+            this.stints = [];
+
+            querySnapshot.forEach((doc) => {
+              this.stints.push({
+                id: doc.id,
+                ...doc.data(),
+              });
+            });
+            console.log("Successfully fetched stints:", this.stints.length);
+          } catch (error) {
+            console.error("Error fetching stints:", error);
+
+            // If it's a permissions error, show a more helpful message
+            if (error.message.includes("permission")) {
+              this.showToast(
+                "Permission denied. Please check Firestore rules.",
+                "error"
+              );
+            } else {
+              this.showToast(
+                "Error fetching stints: " + error.message,
+                "error"
+              );
+            }
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Apply for a stint
+        async applyForStint(stintId) {
+          if (!this.user) {
+            this.showToast(
+              "You must be logged in to apply for a stint",
+              "error"
+            );
+            return;
+          }
+
+          this.loading = true;
+          try {
+            // Check if user has uploaded a CV
+            if (!this.profile.cvUrl) {
+              this.showToast(
+                "Please upload your CV before applying",
+                "warning"
+              );
+              this.switchTab("profile");
+              this.loading = false;
+              return;
+            }
+
+            const applicationData = {
+              stintId: stintId,
+              userId: this.user.uid,
+              userName: this.profile.fullName || this.user.email || "Anonymous",
+              userPhone: this.profile.phone || "",
+              userEmail: this.user.email || "",
+              appliedAt: new Date().toISOString(),
+              status: "pending",
+              cvUrl: this.profile.cvUrl,
+            };
+
+            await addDoc(collection(db, "applications"), applicationData);
+            this.showToast("Application submitted successfully!", "success");
+          } catch (error) {
+            console.error("Error applying for stint:", error);
+            this.showToast(
+              "Error applying for stint: " + error.message,
+              "error"
+            );
+          } finally {
+            this.loading = false;
+          }
+        },
+
+        // Switch tabs
+        switchTab(tab) {
+          this.activeTab = tab;
+
+          if (tab === "stints" && this.accountType === "business") {
+            this.fetchBusinessStints();
+          } else if (tab === "stints" && this.accountType === "jobseeker") {
+            this.fetchAllStints();
+          } else if (tab === "admin" && this.isAdmin) {
+            this.fetchPendingBusinesses();
+          }
+        },
+
+        // Show toast notification
+        showToast(message, type = "info") {
+          const toast = document.createElement("div");
+          toast.className = `toast toast-${type} ${
+            this.darkMode ? "dark" : ""
+          }`;
+          toast.innerHTML = `
+          <div class="toast-content">
+            <span class="toast-icon">
+              ${
+                type === "success"
+                  ? "✓"
+                  : type === "error"
+                  ? "✕"
+                  : type === "warning"
+                  ? "⚠"
+                  : "ℹ"
+              }
+            </span>
+            <span class="toast-message">${message}</span>
+          </div>
+        `;
+
+          document.body.appendChild(toast);
+
+          // Animate in
+          setTimeout(() => {
+            toast.classList.add("show");
+          }, 10);
+
+          // Remove after 3 seconds
+          setTimeout(() => {
+            toast.classList.remove("show");
+            setTimeout(() => {
+              document.body.removeChild(toast);
+            }, 300);
+          }, 3000);
+        },
+      });
+
+      appInstance.mount();
+    </script>
+
+    <script src="https://cdn.jsdelivr.net/npm/petite-vue@latest"></script>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+
+    <!-- Add this to your head section -->
+    <link rel="manifest" href="manifest.json" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta
+      name="apple-mobile-web-app-status-bar-style"
+      content="black-translucent"
+    />
+    <style>
+      :root {
+        --primary-color: #16a34a;
+        --primary-hover: #15803d;
+        --secondary-color: #0ea5e9;
+        --accent-color: #8b5cf6;
+        --success-color: #22c55e;
+        --warning-color: #f59e0b;
+        --error-color: #ef4444;
+        --info-color: #3b82f6;
+
+        --bg-color: #ffffff;
+        --card-bg: #ffffff;
+        --text-color: #1f2937;
+        --text-muted: #6b7280;
+        --border-color: #e5e7eb;
+        --input-bg: #f9fafb;
+        --input-border: #d1d5db;
+
+        --shadow-sm: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+        --shadow: 0 1px 3px 0 rgba(0, 0, 0, 0.1),
+          0 1px 2px 0 rgba(0, 0, 0, 0.06);
+        --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.1),
+          0 2px 4px -1px rgba(0, 0, 0, 0.06);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+          0 4px 6px -2px rgba(0, 0, 0, 0, 0, 0.06);
+        --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.1),
+          0 4px 6px -2px rgba(0, 0, 0, 0.05);
+      }
+
+      .dark-mode {
+        --primary-color: #22c55e;
+        --primary-hover: #16a34a;
+        --secondary-color: #0ea5e9;
+        --accent-color: #a78bfa;
+
+        --bg-color: #111827;
+        --card-bg: #1f2937;
+        --text-color: #f9fafb;
+        --text-muted: #9ca3af;
+        --border-color: #374151;
+        --input-bg: #374151;
+        --input-border: #4b5563;
+      }
+
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+        transition: background-color 0.3s, border-color 0.3s, color 0.3s;
+      }
+
+      body {
+        font-family: "Inter", sans-serif;
+        background-color: var(--bg-color);
+        color: var(--text-color);
+        line-height: 1.5;
+        overscroll-behavior-y: none;
+      }
+
+      .container {
+        max-width: 1200px;
+        margin: 0 auto;
+        padding: 0 1rem;
+      }
+
+      .navbar {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        padding: 1rem 0;
+        margin-bottom: 2rem;
+      }
+
+      .logo {
+        font-size: 1.5rem;
+        font-weight: 700;
+        color: var(--primary-color);
+        text-decoration: none;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .logo-icon {
+        width: 32px;
+        height: 32px;
+        background-color: var(--primary-color);
+        border-radius: 8px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: white;
+        font-weight: bold;
+      }
+
+      .theme-toggle {
+        background: none;
+        border: none;
+        cursor: pointer;
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--text-color);
+        background-color: var(--input-bg);
+      }
+
+      .theme-toggle:hover {
+        background-color: var(--border-color);
+      }
+
+      .auth-container {
+        max-width: 480px;
+        margin: 2rem auto;
+        background-color: var(--card-bg);
+        border-radius: 12px;
+        box-shadow: var(--shadow-lg);
+        overflow: hidden;
+      }
+
+      .auth-header {
+        padding: 1.5rem;
+        text-align: center;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .auth-tabs {
+        display: flex;
+        border-bottom: 1px solid var(--border-color);
+      }
+
+      .auth-tab {
+        flex: 1;
+        text-align: center;
+        padding: 1rem;
+        cursor: pointer;
+        font-weight: 500;
+        color: var(--text-muted);
+        position: relative;
+      }
+
+      .auth-tab.active {
+        color: var(--primary-color);
+      }
+
+      .auth-tab.active::after {
+        content: "";
+        position: absolute;
+        bottom: -1px;
+        left: 0;
+        right: 0;
+        height: 2px;
+        background-color: var(--primary-color);
+      }
+
+      .auth-body {
+        padding: 1.5rem;
+      }
+
+      .toggle-container {
+        display: flex;
+        justify-content: center;
+        margin-bottom: 1.5rem;
+      }
+
+      .toggle-switch {
+        position: relative;
+        display: inline-block;
+        width: 240px;
+        height: 40px;
+        border-radius: 20px;
+        background-color: var(--input-bg);
+        overflow: hidden;
+      }
+
+      .toggle-switch input {
+        opacity: 0;
+        width: 0;
+        height: 0;
+      }
+
+      .toggle-slider {
+        position: absolute;
+        cursor: pointer;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        display: flex;
+        transition: 0.4s;
+      }
+
+      .toggle-option {
+        flex: 1;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1;
+        transition: color 0.3s;
+        font-weight: 500;
+        font-size: 0.875rem;
+      }
+
+      .toggle-highlight {
+        position: absolute;
+        height: 34px;
+        width: 118px;
+        left: 3px;
+        top: 3px;
+        border-radius: 17px;
+        background-color: var(--primary-color);
+        transition: transform 0.3s ease;
+      }
+
+      input:checked + .toggle-slider .toggle-highlight {
+        transform: translateX(116px);
+      }
+
+      input:checked + .toggle-slider .toggle-option:first-child {
+        color: var(--text-muted);
+      }
+
+      input:checked + .toggle-slider .toggle-option:last-child {
+        color: white;
+      }
+
+      input:not(:checked) + .toggle-slider .toggle-option:first-child {
+        color: white;
+      }
+
+      input:not(:checked) + .toggle-slider .toggle-option:last-child {
+        color: var(--text-muted);
+      }
+
+      .form-group {
+        margin-bottom: 1.25rem;
+      }
+
+      .form-label {
+        display: block;
+        margin-bottom: 0.5rem;
+        font-weight: 500;
+        color: var(--text-color);
+      }
+
+      .form-control {
+        width: 100%;
+        padding: 0.75rem 1rem;
+        font-size: 1rem;
+        line-height: 1.5;
+        border-radius: 0.375rem;
+        border: 1px solid var(--input-border);
+        background-color: var(--input-bg);
+        color: var(--text-color);
+        transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
+      }
+
+      .form-control:focus {
+        border-color: var(--primary-color);
+        outline: 0;
+        box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.2);
+      }
+
+      .form-control::placeholder {
+        color: var(--text-muted);
+      }
+
+      .btn {
+        display: inline-block;
+        font-weight: 500;
+        text-align: center;
+        white-space: nowrap;
+        vertical-align: middle;
+        user-select: none;
+        border: 1px solid transparent;
+        padding: 0.75rem 1.5rem;
+        font-size: 1rem;
+        line-height: 1.5;
+        border-radius: 0.375rem;
+        transition: all 0.15s ease-in-out;
+        cursor: pointer;
+      }
+
+      .btn-primary {
+        color: #fff;
+        background-color: var(--primary-color);
+        border-color: var(--primary-color);
+      }
+
+      .btn-primary:hover {
+        background-color: var(--primary-hover);
+        border-color: var(--primary-hover);
+      }
+
+      .btn-secondary {
+        color: #fff;
+        background-color: var(--secondary-color);
+        border-color: var(--secondary-color);
+      }
+
+      .btn-danger {
+        color: #fff;
+        background-color: var(--error-color);
+        border-color: var(--error-color);
+      }
+
+      .btn-outline {
+        background-color: transparent;
+        border-color: var(--border-color);
+        color: var(--text-color);
+      }
+
+      .btn-outline:hover {
+        background-color: var(--input-bg);
+      }
+
+      .btn-block {
+        display: block;
+        width: 100%;
+      }
+
+      .btn-sm {
+        padding: 0.375rem 0.75rem;
+        font-size: 0.875rem;
+      }
+
+      .btn-lg {
+        padding: 1rem 2rem;
+        font-size: 1.125rem;
+      }
+
+      .btn-icon {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 0.5rem;
+      }
+
+      .btn:disabled {
+        opacity: 0.65;
+        cursor: not-allowed;
+      }
+
+      .text-center {
+        text-align: center;
+      }
+
+      .text-muted {
+        color: var(--text-muted);
+      }
+
+      .mt-1 {
+        margin-top: 0.25rem;
+      }
+      .mt-2 {
+        margin-top: 0.5rem;
+      }
+      .mt-3 {
+        margin-top: 0.75rem;
+      }
+      .mt-4 {
+        margin-top: 1rem;
+      }
+      .mt-5 {
+        margin-top: 1.25rem;
+      }
+
+      .mb-1 {
+        margin-bottom: 0.25rem;
+      }
+      .mb-2 {
+        margin-bottom: 0.5rem;
+      }
+      .mb-3 {
+        margin-bottom: 0.75rem;
+      }
+      .mb-4 {
+        margin-bottom: 1rem;
+      }
+      .mb-5 {
+        margin-bottom: 1.25rem;
+      }
+
+      .ml-1 {
+        margin-left: 0.25rem;
+      }
+      .ml-2 {
+        margin-left: 0.5rem;
+      }
+      .ml-3 {
+        margin-left: 0.75rem;
+      }
+      .ml-4 {
+        margin-left: 1rem;
+      }
+      .ml-5 {
+        margin-left: 1.25rem;
+      }
+
+      .mr-1 {
+        margin-right: 0.25rem;
+      }
+      .mr-2 {
+        margin-right: 0.5rem;
+      }
+      .mr-3 {
+        margin-right: 0.75rem;
+      }
+      .mr-4 {
+        margin-right: 1rem;
+      }
+      .mr-5 {
+        margin-right: 1.25rem;
+      }
+
+      .p-1 {
+        padding: 0.25rem;
+      }
+      .p-2 {
+        padding: 0.5rem;
+      }
+      .p-3 {
+        padding: 0.75rem;
+      }
+      .p-4 {
+        padding: 1rem;
+      }
+      .p-5 {
+        padding: 1.25rem;
+      }
+
+      .d-flex {
+        display: flex;
+      }
+
+      .flex-column {
+        flex-direction: column;
+      }
+
+      .align-items-center {
+        align-items: center;
+      }
+
+      .justify-content-between {
+        justify-content: space-between;
+      }
+
+      .justify-content-center {
+        justify-content: center;
+      }
+
+      .gap-1 {
+        gap: 0.25rem;
+      }
+      .gap-2 {
+        gap: 0.5rem;
+      }
+      .gap-3 {
+        gap: 0.75rem;
+      }
+      .gap-4 {
+        gap: 1rem;
+      }
+
+      .w-100 {
+        width: 100%;
+      }
+
+      .text-danger {
+        color: var(--error-color);
+      }
+
+      .text-success {
+        color: var(--success-color);
+      }
+
+      .card {
+        background-color: var(--card-bg);
+        border-radius: 0.5rem;
+        box-shadow: var(--shadow);
+        border: 1px solid var(--border-color);
+        overflow: hidden;
+      }
+
+      .card-header {
+        padding: 1rem 1.25rem;
+        border-bottom: 1px solid var(--border-color);
+        background-color: var(--card-bg);
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+      }
+
+      .card-body {
+        padding: 1.25rem;
+      }
+
+      .card-footer {
+        padding: 1rem 1.25rem;
+        border-top: 1px solid var(--border-color);
+        background-color: var(--card-bg);
+      }
+
+      .tab-container {
+        display: flex;
+        border-bottom: 1px solid var(--border-color);
+        margin-bottom: 1.5rem;
+        overflow-x: auto;
+      }
+
+      .tab-button {
+        padding: 0.75rem 1.25rem;
+        background: none;
+        border: none;
+        border-bottom: 2px solid transparent;
+        color: var(--text-muted);
+        font-weight: 500;
+        cursor: pointer;
+        white-space: nowrap;
+      }
+
+      .tab-button.active {
+        color: var(--primary-color);
+        border-bottom-color: var(--primary-color);
+      }
+
+      .tab-button:hover:not(.active) {
+        color: var(--text-color);
+        background-color: var(--input-bg);
+      }
+
+      .stint-card {
+        border: 1px solid var(--border-color);
+        border-radius: 0.5rem;
+        padding: 1.25rem;
+        margin-bottom: 1rem;
+        background-color: var(--card-bg);
+        transition: transform 0.2s, box-shadow 0.2s;
+      }
+
+      .stint-card:hover {
+        transform: translateY(-2px);
+        box-shadow: var(--shadow-md);
+      }
+
+      .stint-title {
+        font-size: 1.25rem;
+        font-weight: 600;
+        margin-bottom: 0.5rem;
+        color: var(--text-color);
+      }
+
+      .stint-company {
+        color: var(--text-muted);
+        margin-bottom: 0.75rem;
+        font-size: 0.875rem;
+        display: flex;
+        align-items: center;
+        gap: 0.5rem;
+      }
+
+      .stint-details {
+        margin-bottom: 0.75rem;
+        font-size: 0.875rem;
+        color: var(--text-muted);
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+      }
+
+      .stint-detail-item {
+        display: flex;
+        align-items: center;
+        gap: 0.25rem;
+      }
+
+      .progress {
+        height: 0.5rem;
+        background-color: var(--input-bg);
+        border-radius: 0.25rem;
+        overflow: hidden;
+        margin-bottom: 1rem;
+      }
+
+      .progress-bar {
+        height: 100%;
+        background-color: var(--primary-color);
+        border-radius: 0.25rem;
+        transition: width 0.3s ease;
+      }
+
+      .toast {
+        position: fixed;
+        bottom: 1rem;
+        right: 1rem;
+        padding: 1rem;
+        border-radius: 0.5rem;
+        background-color: var(--card-bg);
+        box-shadow: var(--shadow-lg);
+        z-index: 1000;
+        max-width: 350px;
+        transform: translateY(100%);
+        opacity: 0;
+        transition: transform 0.3s ease, opacity 0.3s ease;
+      }
+
+      .toast.show {
+        transform: translateY(0);
+        opacity: 1;
+      }
+
+      .toast.dark {
+        background-color: var(--card-bg);
+        color: var(--text-color);
+      }
+
+      .toast-content {
+        display: flex;
+        align-items: center;
+        gap: 0.75rem;
+      }
+
+      .toast-icon {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-weight: bold;
+      }
+
+      .toast-success .toast-icon {
+        background-color: var(--success-color);
+        color: white;
+      }
+
+      .toast-error .toast-icon {
+        background-color: var(--error-color);
+        color: white;
+      }
+
+      .toast-warning .toast-icon {
+        background-color: var(--warning-color);
+        color: white;
+      }
+
+      .toast-info .toast-icon {
+        background-color: var(--info-color);
+        color: white;
+      }
+
+      .loader {
+        display: inline-block;
+        width: 1.5rem;
+        height: 1.5rem;
+        border: 3px solid rgba(255, 255, 255, 0.3);
+        border-radius: 50%;
+        border-top-color: #fff;
+        animation: spin 1s ease-in-out infinite;
+      }
+
+      @keyframes spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+
+      .badge {
+        display: inline-block;
+        padding: 0.25rem 0.5rem;
+        font-size: 0.75rem;
+        font-weight: 600;
+        border-radius: 9999px;
+      }
+
+      .badge-success {
+        background-color: rgba(34, 197, 94, 0.2);
+        color: var(--success-color);
+      }
+
+      .badge-warning {
+        background-color: rgba(245, 158, 11, 0.2);
+        color: var(--warning-color);
+      }
+
+      .badge-danger {
+        background-color: rgba(239, 68, 68, 0.2);
+        color: var(--error-color);
+      }
+
+      .verification-banner {
+        background-color: var(--card-bg);
+        border: 1px solid var(--border-color);
+        border-radius: 0.5rem;
+        padding: 1rem;
+        margin-bottom: 1.5rem;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+      }
+
+      .verification-banner.pending {
+        border-left: 4px solid var(--warning-color);
+      }
+
+      .verification-banner.verified {
+        border-left: 4px solid var(--success-color);
+      }
+
+      .verification-banner.unverified {
+        border-left: 4px solid var(--error-color);
+      }
+
+      /* Responsive styles */
+      @media (max-width: 768px) {
+        .auth-container {
+          margin: 1rem;
+          max-width: none;
+        }
+
+        .toggle-switch {
+          width: 200px;
+        }
+
+        .toggle-highlight {
+          width: 98px;
+        }
+
+        input:checked + .toggle-slider .toggle-highlight {
+          transform: translateX(98px);
+        }
+      }
+
+      @media (max-width: 480px) {
+        .container {
+          padding: 0 0.5rem;
+        }
+
+        .navbar {
+          padding: 0.75rem 0;
+          margin-bottom: 1rem;
+        }
+
+        .auth-container {
+          margin: 0.5rem;
+          border-radius: 8px;
+        }
+
+        .toggle-switch {
+          width: 100%;
+          max-width: 240px;
+        }
+
+        .form-control {
+          padding: 0.5rem 0.75rem;
+        }
+
+        .btn {
+          padding: 0.5rem 1rem;
+        }
+
+        .card {
+          margin-bottom: 1rem;
+        }
+
+        .card-body {
+          padding: 1rem;
+        }
+
+        .tab-button {
+          padding: 0.5rem 0.75rem;
+          font-size: 0.875rem;
+        }
+
+        .stint-card {
+          padding: 1rem;
+        }
+
+        .d-flex {
+          flex-direction: column;
+        }
+
+        .d-flex.gap-2 {
+          gap: 0.5rem;
+        }
+
+        /* Make buttons full width on mobile */
+        .btn {
+          width: 100%;
+        }
+
+        /* Exception for navbar buttons */
+        .navbar .btn {
+          width: auto;
+        }
+      }
+
+      /* Add touch-friendly styles */
+      @media (hover: none) {
+        .btn,
+        .tab-button,
+        .auth-tab,
+        .toggle-slider,
+        .theme-toggle {
+          cursor: default;
+        }
+
+        /* Increase touch targets */
+        .btn,
+        .form-control,
+        .tab-button,
+        .auth-tab {
+          min-height: 44px;
+        }
+      }
+
+      /* Optimize for touch */
+      .btn,
+      .tab-button,
+      .auth-tab,
+      .toggle-slider,
+      .theme-toggle {
+        -webkit-tap-highlight-color: transparent;
+      }
+
+      /* Add active state for touch feedback */
+      .btn:active,
+      .tab-button:active,
+      .auth-tab:active,
+      .toggle-slider:active {
+        opacity: 0.7;
+        transition: opacity 0.1s;
+      }
+
+      /* Add this class for elements that need to be hidden on mobile */
+      .hide-on-mobile {
+        display: flex;
+      }
+
+      @media (max-width: 480px) {
+        .hide-on-mobile {
+          display: none;
+        }
+      }
+
+      /* Add this class for elements that should only appear on mobile */
+      .show-on-mobile {
+        display: none;
+      }
+
+      @media (max-width: 480px) {
+        .show-on-mobile {
+          display: block;
+        }
+      }
+
+      /* Fix for iOS safe areas */
+      .safe-area-padding-top {
+        padding-top: env(safe-area-inset-top, 0px);
+      }
+
+      .safe-area-padding-bottom {
+        padding-bottom: env(safe-area-inset-bottom, 0px);
+      }
+
+      /* Add this to body */
+      body {
+        overscroll-behavior-y: none;
+      }
+    </style>
+  </head>
+
+  <!-- Modify the body tag to include safe area classes -->
+  <body v-scope class="safe-area-padding-top safe-area-padding-bottom">
+    <di class="container">
+      <!-- Navbar with logo and theme toggle -->
+      <div class="navbar">
+        <a href="#" class="logo">
+          <div class="logo-icon">MS</div>
+          Muslim Stints
+        </a>
+        <button @click="toggleDarkMode" class="theme-toggle">
+          {{ darkMode ? '🔆' : '🌙' }}
+        </button>
+      </div>
+
+      <!-- Authentication Section -->
+      <div v-if="!user" class="auth-container">
+        <div class="auth-header">
+          <h2>Welcome to Muslim Stints</h2>
+          <p class="text-muted">
+            Find short-term work opportunities, aligning work with ethics &
+            morals
+          </p>
+        </div>
+
+        <div class="auth-tabs">
+          <div
+            @click="isSignUp = false"
+            class="auth-tab"
+            :class="{ active: !isSignUp }"
+          >
+            Login
+          </div>
+          <div
+            @click="isSignUp = true"
+            class="auth-tab"
+            :class="{ active: isSignUp }"
+          >
+            Sign Up
+          </div>
+        </div>
+
+        <div v-if="isSignUp" class="toggle-container">
+          <div class="toggle-switch">
+            <input
+              type="radio"
+              id="jobseeker-radio"
+              name="accountType"
+              value="jobseeker"
+              v-model="accountType"
+              hidden
+            />
+            <input
+              type="radio"
+              id="business-radio"
+              name="accountType"
+              value="business"
+              v-model="accountType"
+              hidden
+            />
+        
+            <div class="toggle-slider">
+              <label
+                for="jobseeker-radio"
+                class="toggle-option"
+                :class="{ active: accountType === 'jobseeker' }"
+              >
+                Job Seeker
+              </label>
+              <label
+                for="business-radio"
+                class="toggle-option"
+                :class="{ active: accountType === 'business' }"
+              >
+                Business
+              </label>
+              <span
+                class="toggle-highlight"
+                :class="{
+                  'left': accountType === 'jobseeker',
+                  'right': accountType === 'business'
+                }"
+              ></span>
+            </div>
+          </div>
+        </div>        
+        
+          <!-- Login/Signup Form -->
+          <form @submit.prevent="isSignUp ? signUpUser() : loginUser()">
+            <div class="form-group">
+              <label for="email" class="form-label">Email</label>
+              <input
+                type="email"
+                id="email"
+                class="form-control"
+                v-model="email"
+                placeholder="Enter your email"
+                required
+              />
+            </div>
+
+            <div class="form-group">
+              <label for="password" class="form-label">Password</label>
+              <input
+                type="password"
+                id="password"
+                class="form-control"
+                v-model="password"
+                placeholder="Enter your password"
+                required
+              />
+            </div>
+
+            <!-- Confirm Password (Sign-Up only) -->
+            <div v-if="isSignUp" class="form-group">
+              <label for="confirmPassword" class="form-label"
+                >Confirm Password</label
+              >
+              <input
+                type="password"
+                id="confirmPassword"
+                class="form-control"
+                v-model="confirmPassword"
+                placeholder="Confirm your password"
+                required
+              />
+            </div>
+
+            <!-- Error Messages -->
+            <div v-if="loginError || signUpError" class="text-danger mb-3">
+              {{ isSignUp ? signUpError : loginError }}
+            </div>
+
+            <!-- Submit Button -->
+            <button
+              type="submit"
+              class="btn btn-primary btn-block"
+              :disabled="loading"
+            >
+              <span v-if="loading" class="loader mr-2"></span>
+              {{ isSignUp ? 'Create Account' : 'Login' }}
+            </button>
+          </form>
+        </div>
+
+      <!-- Logged-In Section -->
+      <div v-else>
+        <div class="d-flex justify-content-between align-items-center mb-4">
+          <h2>
+            Welcome, {{ userProfile?.fullName || userProfile?.companyName ||
+            user.email }}
+          </h2>
+          <button @click="logoutUser" class="btn btn-danger">Logout</button>
+        </div>
+
+        <!-- Business Verification Banner -->
+        <div
+          v-if="accountType === 'business'"
+          class="verification-banner"
+          :class="{
+        'verified': business.verified,
+        'pending': business.verificationRequested && !business.verified,
+        'unverified': !business.verificationRequested && !business.verified
+      }"
+        >
+          <div>
+            <div
+              v-if="business.verified"
+              class="d-flex align-items-center gap-2"
+            >
+              <span class="badge badge-success">Verified</span>
+              <span>Your business is verified and you can post stints.</span>
+            </div>
+            <div
+              v-else-if="business.verificationRequested"
+              class="d-flex align-items-center gap-2"
+            >
+              <span class="badge badge-warning">Pending</span>
+              <span>Your verification request is pending approval.</span>
+            </div>
+            <div v-else class="d-flex align-items-center gap-2">
+              <span class="badge badge-danger">Unverified</span>
+              <span
+                >Your business needs to be verified before you can post
+                stints.</span
+              >
+            </div>
+          </div>
+          <button
+            v-if="!business.verified && !business.verificationRequested"
+            @click="requestVerification"
+            class="btn btn-primary btn-sm"
+            :disabled="loading"
+          >
+            Request Verification
+          </button>
+        </div>
+
+        <!-- Debug Panel -->
+        <div
+          class="card mb-4 p-3"
+          style="background-color: #f8f9fa; border: 1px solid #ddd"
+        >
+          <div class="d-flex justify-content-between align-items-center mb-2">
+            <h5 class="m-0">Debug Information</h5>
+            <button @click="fetchUserData" class="btn btn-sm btn-outline">
+              Refresh User Data
+            </button>
+          </div>
+          <pre style="font-size: 12px; white-space: pre-wrap; overflow-x: auto">
+User ID: {{ user ? user.uid : 'null' }}
+Email: {{ user ? user.email : 'null' }}
+Account Type: {{ accountType }}
+User Profile: {{ userProfile ? 'loaded' : 'null' }}
+Business Data: {{ accountType === 'business' ? JSON.stringify(business, null, 2) : 'N/A' }}
+        </pre
+          >
+        </div>
+
+        <!-- Fallback UI for missing profile data -->
+        <div v-if="user && !userProfile" class="card p-4 text-center">
+          <h3 class="mb-3">Profile Not Found</h3>
+          <p>We couldn't find your profile data. This might be due to:</p>
+          <ul class="text-left mb-3">
+            <li>Your account was just created and data is still processing</li>
+            <li>There was an error saving your profile</li>
+            <li>
+              You're using a different account type than what was registered
+            </li>
+          </ul>
+          <button @click="fetchUserData" class="btn btn-primary">
+            Retry Loading Profile
+          </button>
+          <button @click="logoutUser" class="btn btn-outline mt-2">
+            Logout
+          </button>
+        </div>
+
+        <!-- Navigation Tabs -->
+        <div class="tab-container">
+          <button
+            @click="switchTab('profile')"
+            class="tab-button"
+            :class="{ active: activeTab === 'profile' }"
+          >
+            {{ accountType === 'business' ? 'Business Profile' : 'My Profile' }}
+          </button>
+          <button
+            @click="switchTab('stints')"
+            class="tab-button"
+            :class="{ active: activeTab === 'stints' }"
+          >
+            {{ accountType === 'business' ? 'My Stints' : 'Available Stints' }}
+          </button>
+          <button
+            v-if="isAdmin"
+            @click="switchTab('admin')"
+            class="tab-button"
+            :class="{ active: activeTab === 'admin' }"
+          >
+            Admin Panel
+          </button>
+        </div>
+
+        <!-- Profile Tab -->
+        <div v-if="activeTab === 'profile'">
+          <!-- Job Seeker Profile Form (Simplified) -->
+          <div v-if="accountType === 'jobseeker'" class="card">
+            <div class="card-header">
+              <h3>My Profile</h3>
+            </div>
+            <div class="card-body">
+              <form @submit.prevent="saveUserProfile">
+                <div class="form-group">
+                  <label for="fullName" class="form-label">Full Name</label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="fullName"
+                    v-model="profile.fullName"
+                    required
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label for="phone" class="form-label">Phone Number</label>
+                  <input
+                    type="tel"
+                    class="form-control"
+                    id="phone"
+                    v-model="profile.phone"
+                    required
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label for="cvFile" class="form-label"
+                    >Upload CV/Resume</label
+                  >
+                  <input
+                    type="file"
+                    class="form-control"
+                    id="cvFile"
+                    @change="handleFileSelect"
+                    accept=".pdf,.doc,.docx"
+                  />
+                  <small class="text-muted"
+                    >Accepted formats: PDF, DOC, DOCX</small
+                  >
+                </div>
+
+                <!-- Show progress bar during upload -->
+                <div v-if="isUploading" class="form-group">
+                  <div class="progress">
+                    <div
+                      class="progress-bar"
+                      :style="{ width: uploadProgress + '%' }"
+                    ></div>
+                  </div>
+                  <p class="text-center">{{ uploadProgress }}% Uploaded</p>
+                </div>
+
+                <!-- Show current CV if available -->
+                <div v-if="profile.cvUrl" class="form-group">
+                  <p>
+                    Current CV:
+                    <a
+                      :href="profile.cvUrl"
+                      target="_blank"
+                      class="btn btn-sm btn-outline"
+                      >View CV</a
+                    >
+                  </p>
+                </div>
+
+                <div class="d-flex gap-2">
+                  <button
+                    type="button"
+                    class="btn btn-secondary"
+                    @click="uploadCV"
+                    :disabled="isUploading || !cvFile"
+                  >
+                    {{ isUploading ? 'Uploading...' : 'Upload CV' }}
+                  </button>
+                  <button
+                    type="submit"
+                    class="btn btn-primary"
+                    :disabled="isUploading || loading"
+                  >
+                    <span v-if="loading" class="loader mr-2"></span>
+                    Save Profile
+                  </button>
+                </div>
+              </form>
+            </div>
+          </div>
+
+          <!-- Business Profile Form -->
+          <div v-if="accountType === 'business'" class="card">
+            <div class="card-header">
+              <h3>Business Profile</h3>
+            </div>
+            <div class="card-body">
+              <form @submit.prevent="saveBusinessProfile">
+                <div class="form-group">
+                  <label for="companyName" class="form-label"
+                    >Company Name</label
+                  >
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="companyName"
+                    v-model="business.companyName"
+                    required
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label for="industry" class="form-label">Industry</label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="industry"
+                    v-model="business.industry"
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label for="location" class="form-label">Location</label>
+                  <input
+                    type="text"
+                    class="form-control"
+                    id="location"
+                    v-model="business.location"
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label for="description" class="form-label"
+                    >Company Description</label
+                  >
+                  <textarea
+                    class="form-control"
+                    id="description"
+                    rows="3"
+                    v-model="business.description"
+                  ></textarea>
+                </div>
+
+                <div class="form-group">
+                  <label for="website" class="form-label">Website</label>
+                  <input
+                    type="url"
+                    class="form-control"
+                    id="website"
+                    v-model="business.website"
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label for="contactEmail" class="form-label"
+                    >Contact Email</label
+                  >
+                  <input
+                    type="email"
+                    class="form-control"
+                    id="contactEmail"
+                    v-model="business.contactEmail"
+                  />
+                </div>
+
+                <div class="form-group">
+                  <label for="contactPhone" class="form-label"
+                    >Contact Phone</label
+                  >
+                  <input
+                    type="tel"
+                    class="form-control"
+                    id="contactPhone"
+                    v-model="business.contactPhone"
+                  />
+                </div>
+
+                <button
+                  type="submit"
+                  class="btn btn-primary"
+                  :disabled="loading"
+                >
+                  <span v-if="loading" class="loader mr-2"></span>
+                  Save Business Profile
+                </button>
+              </form>
+            </div>
+          </div>
+        </div>
+
+        <!-- Stints Tab -->
+        <div v-if="activeTab === 'stints'">
+          <!-- For Businesses: Post New Stint + List of Posted Stints -->
+          <div v-if="accountType === 'business'">
+            <!-- Show verification message if not verified -->
+            <div v-if="!business.verified" class="card mb-4 p-4 text-center">
+              <h3 class="mb-3">Business Verification Required</h3>
+              <p>
+                Your business needs to be verified before you can post stints.
+              </p>
+              <p class="text-muted mb-3">
+                Please complete your business profile and request verification.
+              </p>
+              <button
+                v-if="!business.verificationRequested"
+                @click="requestVerification"
+                class="btn btn-primary"
+                :disabled="loading"
+              >
+                Request Verification
+              </button>
+              <p v-else class="mt-3 text-success">
+                Verification request submitted. Please wait for approval.
+              </p>
+            </div>
+
+            <!-- Post New Stint (only for verified businesses) -->
+            <div v-if="business.verified" class="card mb-4">
+              <div class="card-header">
+                <h3>Post a New Stint</h3>
+              </div>
+              <div class="card-body">
+                <form @submit.prevent="postStint">
+                  <div class="form-group">
+                    <label for="stintTitle" class="form-label"
+                      >Stint Title</label
+                    >
+                    <input
+                      type="text"
+                      class="form-control"
+                      id="stintTitle"
+                      v-model="newStint.title"
+                      required
+                    />
+                  </div>
+
+                  <div class="form-group">
+                    <label for="stintDescription" class="form-label"
+                      >Description</label
+                    >
+                    <textarea
+                      class="form-control"
+                      id="stintDescription"
+                      rows="3"
+                      v-model="newStint.description"
+                      required
+                    ></textarea>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="stintRequirements" class="form-label"
+                      >Requirements</label
+                    >
+                    <textarea
+                      class="form-control"
+                      id="stintRequirements"
+                      rows="2"
+                      v-model="newStint.requirements"
+                    ></textarea>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="stintLocation" class="form-label"
+                      >Location</label
+                    >
+                    <input
+                      type="text"
+                      class="form-control"
+                      id="stintLocation"
+                      v-model="newStint.location"
+                    />
+                  </div>
+
+                  <div class="form-group">
+                    <label for="stintPayment" class="form-label">Payment</label>
+                    <input
+                      type="text"
+                      class="form-control"
+                      id="stintPayment"
+                      v-model="newStint.payment"
+                      placeholder="e.g., $200 per day"
+                    />
+                  </div>
+
+                  <div class="form-group">
+                    <label for="stintDuration" class="form-label"
+                      >Duration</label
+                    >
+                    <input
+                      type="text"
+                      class="form-control"
+                      id="stintDuration"
+                      v-model="newStint.duration"
+                      placeholder="e.g., 3 days, 1 week"
+                    />
+                  </div>
+
+                  <div class="form-group">
+                    <label for="stintStartDate" class="form-label"
+                      >Start Date</label
+                    >
+                    <input
+                      type="date"
+                      class="form-control"
+                      id="stintStartDate"
+                      v-model="newStint.startDate"
+                    />
+                  </div>
+
+                  <button
+                    type="submit"
+                    class="btn btn-primary"
+                    :disabled="loading"
+                  >
+                    <span v-if="loading" class="loader mr-2"></span>
+                    Post Stint
+                  </button>
+                </form>
+              </div>
+            </div>
+
+            <h3 class="mb-3">Your Stints</h3>
+            <div v-if="loading" class="d-flex justify-content-center p-5">
+              <div
+                class="loader"
+                style="
+                  border-color: var(--border-color);
+                  border-top-color: var(--primary-color);
+                "
+              ></div>
+            </div>
+
+            <div v-else-if="stints.length === 0" class="card p-4 text-center">
+              <p>You haven't posted any stints yet.</p>
+              <button
+                v-if="business.verified"
+                @click="switchTab('stints')"
+                class="btn btn-primary mt-2"
+              >
+                Post Your First Stint
+              </button>
+            </div>
+
+            <div v-else>
+              <div v-for="stint in stints" :key="stint.id" class="stint-card">
+                <div class="stint-title">{{ stint.title }}</div>
+                <div class="stint-company">
+                  <span>{{ stint.businessName }}</span>
+                  <span>•</span>
+                  <span>{{ stint.location || 'Remote' }}</span>
+                </div>
+                <div class="stint-details">
+                  <div class="stint-detail-item">
+                    <span>⏱️</span>
+                    <span>{{ stint.duration || 'Flexible' }}</span>
+                  </div>
+                  <div class="stint-detail-item">
+                    <span>📅</span>
+                    <span
+                      >{{ stint.startDate ? new
+                      Date(stint.startDate).toLocaleDateString() : 'Flexible'
+                      }}</span
+                    >
+                  </div>
+                  <div class="stint-detail-item">
+                    <span>📝</span>
+                    <span
+                      >Posted: {{ new Date(stint.postedAt).toLocaleDateString()
+                      }}</span
+                    >
+                  </div>
+                </div>
+                <div class="mb-2">{{ stint.description }}</div>
+                <div v-if="stint.payment" class="mb-2">
+                  <strong>Payment:</strong> {{ stint.payment }}
+                </div>
+                <div v-if="stint.requirements" class="mb-2">
+                  <strong>Requirements:</strong> {{ stint.requirements }}
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- For Job Seekers: List of Available Stints -->
+          <div v-if="accountType === 'jobseeker'">
+            <h3 class="mb-3">Available Stints</h3>
+            <div v-if="loading" class="d-flex justify-content-center p-5">
+              <div
+                class="loader"
+                style="
+                  border-color: var(--border-color);
+                  border-top-color: var(--primary-color);
+                "
+              ></div>
+            </div>
+
+            <div v-else-if="stints.length === 0" class="card p-4 text-center">
+              <p>No stints available at the moment.</p>
+              <p class="text-muted">Check back later for new opportunities.</p>
+            </div>
+
+            <div v-else>
+              <div v-for="stint in stints" :key="stint.id" class="stint-card">
+                <div class="stint-title">{{ stint.title }}</div>
+                <div class="stint-company">
+                  <span>{{ stint.businessName }}</span>
+                  <span>•</span>
+                  <span>{{ stint.location || 'Remote' }}</span>
+                </div>
+                <div class="stint-details">
+                  <div class="stint-detail-item">
+                    <span>⏱️</span>
+                    <span>{{ stint.duration || 'Flexible' }}</span>
+                  </div>
+                  <div class="stint-detail-item">
+                    <span>📅</span>
+                    <span
+                      >{{ stint.startDate ? new
+                      Date(stint.startDate).toLocaleDateString() : 'Flexible'
+                      }}</span
+                    >
+                  </div>
+                  <div class="stint-detail-item">
+                    <span>📝</span>
+                    <span
+                      >Posted: {{ new Date(stint.postedAt).toLocaleDateString()
+                      }}</span
+                    >
+                  </div>
+                </div>
+                <div class="mb-2">{{ stint.description }}</div>
+                <div v-if="stint.payment" class="mb-2">
+                  <strong>Payment:</strong> {{ stint.payment }}
+                </div>
+                <div v-if="stint.requirements" class="mb-2">
+                  <strong>Requirements:</strong> {{ stint.requirements }}
+                </div>
+                <button
+                  @click="applyForStint(stint.id)"
+                  class="btn btn-primary mt-2"
+                  :disabled="loading"
+                >
+                  <span v-if="loading" class="loader mr-2"></span>
+                  Apply Now
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Admin Panel Tab -->
+        <div v-if="activeTab === 'admin' && isAdmin">
+          <div class="card">
+            <div class="card-header">
+              <h3>Admin Panel - Business Verification</h3>
+            </div>
+            <div class="card-body">
+              <div v-if="loading" class="d-flex justify-content-center p-5">
+                <div
+                  class="loader"
+                  style="
+                    border-color: var(--border-color);
+                    border-top-color: var(--primary-color);
+                  "
+                ></div>
+              </div>
+
+              <div
+                v-else-if="pendingBusinesses.length === 0"
+                class="text-center p-4"
+              >
+                <p>No pending verification requests.</p>
+              </div>
+
+              <div v-else>
+                <h4 class="mb-3">Pending Verification Requests</h4>
+                <div
+                  v-for="business in pendingBusinesses"
+                  :key="business.id"
+                  class="card mb-3"
+                >
+                  <div class="card-body">
+                    <h5>{{ business.companyName || 'Unnamed Business' }}</h5>
+                    <p><strong>Email:</strong> {{ business.email }}</p>
+                    <p v-if="business.industry">
+                      <strong>Industry:</strong> {{ business.industry }}
+                    </p>
+                    <p v-if="business.location">
+                      <strong>Location:</strong> {{ business.location }}
+                    </p>
+                    <p v-if="business.website">
+                      <strong>Website:</strong>
+                      <a :href="business.website" target="_blank"
+                        >{{ business.website }}</a
+                      >
+                    </p>
+                    <p v-if="business.description">
+                      <strong>Description:</strong> {{ business.description }}
+                    </p>
+                    <div class="d-flex gap-2 mt-3">
+                      <button
+                        @click="verifyBusiness(business.id)"
+                        class="btn btn-primary"
+                        :disabled="loading"
+                      >
+                        <span v-if="loading" class="loader mr-2"></span>
+                        Verify Business
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </body>
+  <!-- Add this script to the end of your body tag -->
+  <script>
+    // Register Service Worker
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker
+          .register("/service-worker.js")
+          .then((registration) => {
+            console.log(
+              "ServiceWorker registration successful with scope: ",
+              registration.scope
+            );
+          })
+          .catch((error) => {
+            console.log("ServiceWorker registration failed: ", error);
+          });
+      });
+    }
+  </script>
+</html>

@@ -1,0 +1,32 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // User profile rules
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    // Business profile rules
+    match /businesses/{businessId} {
+      allow read, write: if request.auth != null && request.auth.uid == businessId;
+    }
+
+    // Admins collection (read-only access for checking admin status)
+    match /admins/{adminId} {
+      allow get: if request.auth != null && request.auth.uid == adminId;
+    }
+
+    // Stints collection
+    match /stints/{stintId} {
+      allow read: if true; // Anyone can read stints
+      allow write: if request.auth != null;
+    }
+
+    // Applications collection
+    match /applications/{appId} {
+      allow write: if request.auth != null;
+      allow read: if false; // Disable read unless you need it
+    }
+  }
+}
