@@ -1124,6 +1124,7 @@
       .auth-tabs {
         display: flex;
         border-bottom: 1px solid var(--border-color);
+        margin-bottom: 1.5rem;
       }
 
       .auth-tab {
@@ -1231,6 +1232,7 @@
 
       .form-group {
         margin-bottom: 1.25rem;
+        padding: 0.75rem 1rem;
       }
 
       .form-label {
@@ -1870,7 +1872,7 @@
 
   <!-- Modify the body tag to include safe area classes -->
   <body v-scope class="safe-area-padding-top safe-area-padding-bottom">
-    <di class="container">
+    <div class="container">
       <!-- Navbar with logo and theme toggle -->
       <div class="navbar">
         <a href="#" class="logo">
@@ -1927,7 +1929,7 @@
               v-model="accountType"
               hidden
             />
-        
+
             <div class="toggle-slider">
               <label
                 for="jobseeker-radio"
@@ -1952,65 +1954,65 @@
               ></span>
             </div>
           </div>
-        </div>        
-        
-          <!-- Login/Signup Form -->
-          <form @submit.prevent="isSignUp ? signUpUser() : loginUser()">
-            <div class="form-group">
-              <label for="email" class="form-label">Email</label>
-              <input
-                type="email"
-                id="email"
-                class="form-control"
-                v-model="email"
-                placeholder="Enter your email"
-                required
-              />
-            </div>
-
-            <div class="form-group">
-              <label for="password" class="form-label">Password</label>
-              <input
-                type="password"
-                id="password"
-                class="form-control"
-                v-model="password"
-                placeholder="Enter your password"
-                required
-              />
-            </div>
-
-            <!-- Confirm Password (Sign-Up only) -->
-            <div v-if="isSignUp" class="form-group">
-              <label for="confirmPassword" class="form-label"
-                >Confirm Password</label
-              >
-              <input
-                type="password"
-                id="confirmPassword"
-                class="form-control"
-                v-model="confirmPassword"
-                placeholder="Confirm your password"
-                required
-              />
-            </div>
-
-            <!-- Error Messages -->
-            <div v-if="loginError || signUpError" class="text-danger mb-3">
-              {{ isSignUp ? signUpError : loginError }}
-            </div>
-
-            <!-- Submit Button -->
-            <button
-              type="submit"
-              class="btn btn-primary btn-block"
-              :disabled="loading"
-            >
-              <span v-if="loading" class="loader mr-2"></span>
-              {{ isSignUp ? 'Create Account' : 'Login' }}
-            </button>
-          </form>
         </div>
+
+        <!-- Login/Signup Form -->
+        <form @submit.prevent="isSignUp ? signUpUser() : loginUser()">
+          <div class="form-group">
+            <label for="email" class="form-label">Email</label>
+            <input
+              type="email"
+              id="email"
+              class="form-control"
+              v-model="email"
+              placeholder="Enter your email"
+              required
+            />
+          </div>
+
+          <div class="form-group">
+            <label for="password" class="form-label">Password</label>
+            <input
+              type="password"
+              id="password"
+              class="form-control"
+              v-model="password"
+              placeholder="Enter your password"
+              required
+            />
+          </div>
+
+          <!-- Confirm Password (Sign-Up only) -->
+          <div v-if="isSignUp" class="form-group">
+            <label for="confirmPassword" class="form-label"
+              >Confirm Password</label
+            >
+            <input
+              type="password"
+              id="confirmPassword"
+              class="form-control"
+              v-model="confirmPassword"
+              placeholder="Confirm your password"
+              required
+            />
+          </div>
+
+          <!-- Error Messages -->
+          <div v-if="loginError || signUpError" class="text-danger mb-3">
+            {{ isSignUp ? signUpError : loginError }}
+          </div>
+
+          <!-- Submit Button -->
+          <button
+            type="submit"
+            class="btn btn-primary btn-block"
+            :disabled="loading"
+          >
+            <span v-if="loading" class="loader mr-2"></span>
+            {{ isSignUp ? 'Create Account' : 'Login' }}
+          </button>
+        </form>
+      </div>
 
       <!-- Logged-In Section -->
       <div v-else>
