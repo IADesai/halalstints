@@ -2,16 +2,16 @@ rules_version = '2';
 service firebase.storage {
   match /b/{bucket}/o {
     
-    // Only allow authenticated users to access files under their own folder
+    // Allow authenticated users to read/write only in their own folder
     match /cvs/{userId}/{allPaths=**} {
       allow read, write: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Allow unauthenticated requests (including OPTIONS) to pass the initial check
-    // The actual upload will still be protected by the authenticated rule above.
+    // Deny everything else explicitly
     match /{allPaths=**} {
-       allow read, write: if request.method == 'OPTIONS';
+      allow read, write: if false;
     }
   }
 }
+
 
