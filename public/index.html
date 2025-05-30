@@ -111,6 +111,32 @@
           startDate: "",
         },
 
+        resetState() {
+          this.user = null;
+          this.userProfile = null;
+          this.accountType = "jobseeker";
+          this.stints = [];
+          this.applications = [];
+          this.isAdmin = false;
+          this.pendingBusinesses = [];
+          this.profile = {
+            fullName: "",
+            phone: "",
+            cvUrl: "",
+          };
+          this.business = {
+            companyName: "",
+            industry: "",
+            location: "",
+            description: "",
+            website: "",
+            contactEmail: "",
+            contactPhone: "",
+            verified: false,
+            verificationRequested: false,
+          };
+        },
+
         // Stints list
         stints: [],
 
@@ -199,64 +225,49 @@
 
         // Modify your init() method to call initMobileApp
         init() {
-          // Set initial theme
-          this.applyTheme();
-
-          // Initialize mobile app features
-          this.initMobileApp();
-
-          // Setup offline detection
-          this.setupOfflineDetection();
-
-          // In the init() method, update the onAuthStateChanged handler with better error handling
           onAuthStateChanged(auth, async (user) => {
             console.log("Auth state changed, user:", user);
+
+            if (!user) {
+              this.resetState();
+              return;
+            }
+
             this.user = user;
+            let retries = 3;
 
-            if (user) {
+            for (let i = 0; i < retries; i++) {
               try {
-                // Check if user has a profile
                 await this.fetchUserData();
-                console.log(
-                  "User data fetched, account type:",
-                  this.accountType
-                );
-
-                // Check if user is admin
-                await this.checkAdminStatus();
-                console.log("Admin status checked:", this.isAdmin);
-
-                // If business account, fetch job postings
-                if (this.accountType === "business") {
-                  await this.fetchBusinessStints();
-                  console.log("Business stints fetched");
-                } else {
-                  // For job seekers, fetch all stints
-                  await this.fetchAllStints();
-                  console.log("All stints fetched for job seeker");
-                }
-
-                // If admin, fetch pending businesses
-                if (this.isAdmin) {
-                  await this.fetchPendingBusinesses();
-                  console.log("Pending businesses fetched for admin");
-                }
-              } catch (error) {
-                console.error("Error during initialization:", error);
-                this.showToast("Error loading data: " + error.message, "error");
+                break;
+              } catch (e) {
+                console.warn(`Retry ${i + 1} to fetch user data failed`, e);
+                await new Promise((r) => setTimeout(r, 1000));
               }
-            } else {
-              // Reset state when user logs out
-              this.userProfile = null;
-              this.accountType = "jobseeker";
-              this.stints = [];
-              this.applications = [];
-              this.isAdmin = false;
-              this.pendingBusinesses = [];
+            }
+
+            try {
+              await this.checkAdminStatus();
+              console.log("Admin status checked:", this.isAdmin);
+
+              if (this.accountType === "business") {
+                await this.fetchBusinessStints();
+                console.log("Business stints fetched");
+              } else {
+                await this.fetchAllStints();
+                console.log("All stints fetched for job seeker");
+              }
+
+              if (this.isAdmin) {
+                await this.fetchPendingBusinesses();
+                console.log("Pending businesses fetched for admin");
+              }
+            } catch (error) {
+              console.error("Error during post-login init:", error);
+              this.showToast("Error loading data: " + error.message, "error");
             }
           });
         },
-
         // Toggle dark mode
         toggleDarkMode() {
           this.darkMode = !this.darkMode;
@@ -287,6 +298,10 @@
             );
             this.user = userCredential.user;
             console.log("Login successful, user ID:", userCredential.user.uid);
+
+            // Force profile fetch
+            await this.fetchUserData();
+
             this.showToast("Login successful!", "success");
           } catch (error) {
             console.error("Login failed:", error);
@@ -350,6 +365,7 @@
                 doc(db, collectionName, userCredential.user.uid),
                 userData
               );
+              await this.fetchUserData();
               console.log(`User data saved to ${collectionName} collection`);
 
               // 6. Verify data was saved by reading it back
@@ -403,12 +419,7 @@
         async logoutUser() {
           try {
             await signOut(auth);
-            this.user = null;
-            this.userProfile = null;
-            this.stints = [];
-            this.applications = [];
-            this.isAdmin = false;
-            this.pendingBusinesses = [];
+            this.resetState();
           } catch (error) {
             console.error("Logout failed:", error.message);
           }
@@ -943,21 +954,21 @@
             this.darkMode ? "dark" : ""
           }`;
           toast.innerHTML = `
-          <div class="toast-content">
-            <span class="toast-icon">
-              ${
-                type === "success"
-                  ? "✓"
-                  : type === "error"
-                  ? "✕"
-                  : type === "warning"
-                  ? "⚠"
-                  : "ℹ"
-              }
-            </span>
-            <span class="toast-message">${message}</span>
-          </div>
-        `;
+                    <div class="toast-content">
+                      <span class="toast-icon">
+                        ${
+                          type === "success"
+                            ? "✓"
+                            : type === "error"
+                            ? "✕"
+                            : type === "warning"
+                            ? "⚠"
+                            : "ℹ"
+                        }
+                      </span>
+                      <span class="toast-message">${message}</span>
+                    </div>
+                  `;
 
           document.body.appendChild(toast);
 
