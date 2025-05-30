@@ -10,14 +10,14 @@
 
     <!-- Firebase SDK -->
     <script type="module">
-      import { initializeApp } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-app.js";
+      import { initializeApp } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-app.js";
       import {
         getAuth,
         onAuthStateChanged,
         createUserWithEmailAndPassword,
         signInWithEmailAndPassword,
         signOut,
-      } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-auth.js";
+      } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
       import {
         getFirestore,
         doc,
@@ -29,13 +29,13 @@
         where,
         getDocs,
         orderBy,
-      } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-firestore.js";
+      } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js";
       import {
         getStorage,
         ref,
         uploadBytesResumable,
         getDownloadURL,
-      } from "https://www.gstatic.com/firebasejs/9.0.0/firebase-storage.js";
+      } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-storage.js";
 
       const firebaseConfig = {
         apiKey: "AIzaSyBAasFIFGcPq1p205G36yVoTd9-UqMMLwk",
@@ -613,61 +613,36 @@
 
         // Upload CV to Firebase Storage
         async uploadCV() {
-          if (!this.cvFile) {
-            this.showToast("Please select a CV file first", "error");
+          if (!this.cvFile || !this.user) {
+            this.showToast("No file or user selected", "warning");
             return;
           }
 
-          if (!this.user) {
-            this.showToast("You must be logged in to upload a CV", "error");
-            return;
-          }
+          const file = this.cvFile;
+          const uid = this.user.uid;
+          const path = `cvs/${this.user.uid}/${file.name}`;
+          const storageRef = ref(storage, path);
+          const uploadTask = uploadBytesResumable(storageRef, file);
 
-          this.isUploading = true;
-          this.uploadProgress = 0;
-
-          try {
-            // Create a storage reference
-            const storageRef = ref(
-              storage,
-              `cvs/${this.user.uid}/${this.cvFile.name}`
-            );
-
-            // Upload file
-            const uploadTask = uploadBytesResumable(storageRef, this.cvFile);
-
-            // Monitor upload progress
-            uploadTask.on(
-              "state_changed",
-              (snapshot) => {
-                // Track progress
-                const progress =
-                  (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-                this.uploadProgress = Math.round(progress);
-              },
-              (error) => {
-                // Handle errors
-                console.error("Upload failed:", error);
-                this.showToast("Upload failed: " + error.message, "error");
-                this.isUploading = false;
-              },
-              async () => {
-                // Upload completed successfully
-                const downloadURL = await getDownloadURL(
-                  uploadTask.snapshot.ref
-                );
-                this.profile.cvUrl = downloadURL;
-                this.isUploading = false;
-
-                // Save the profile with the CV URL
-                await this.saveUserProfile();
-              }
-            );
-          } catch (error) {
-            console.error("Error uploading CV:", error);
-            this.showToast("Error uploading CV: " + error.message, "error");
-            this.isUploading = false;
-          }
+          uploadTask.on(
+            "state_changed",
+            (snapshot) => {
+              this.uploadProgress =
+                (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              this.isUploading = true;
+            },
+            (error) => {
+              console.error("Upload error:", error);
+              this.showToast("Upload failed: " + error.message, "error");
+              this.isUploading = false;
+            },
+            async () => {
+              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
+              this.profile.cvUrl = downloadURL;
+              this.isUploading = false;
+              this.showToast("CV uploaded successfully!", "success");
+            }
+          );
         },
 
         // Save user profile
