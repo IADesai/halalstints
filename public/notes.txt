@@ -1,0 +1,3 @@
+I wish for there to be a way for the applications to be viewed by the business, and accepted or declined.
+I also wish for the users to be able to see which stints they have applied for already.
+I also need there to be a way for businesses to remove or edit stints.

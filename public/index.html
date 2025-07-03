@@ -29,12 +29,15 @@
         where,
         getDocs,
         orderBy,
+        updateDoc,
       } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js";
       import {
         getStorage,
         ref,
         uploadBytesResumable,
         getDownloadURL,
+        listAll,
+        deleteObject,
       } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-storage.js";
 
       const firebaseConfig = {
@@ -611,7 +614,7 @@
           }
         },
 
-        // Upload CV to Firebase Storage
+        // Upload CV
         async uploadCV() {
           if (!this.cvFile || !this.user) {
             this.showToast("No file or user selected", "warning");
@@ -620,29 +623,68 @@
 
           const file = this.cvFile;
           const uid = this.user.uid;
-          const path = `cvs/${this.user.uid}/${file.name}`;
-          const storageRef = ref(storage, path);
-          const uploadTask = uploadBytesResumable(storageRef, file);
+          const userFolderRef = ref(storage, `cvs/${uid}`);
+          const newCVPath = `cvs/${uid}/${file.name}`;
+          const storageRef = ref(storage, newCVPath);
 
-          uploadTask.on(
-            "state_changed",
-            (snapshot) => {
-              this.uploadProgress =
-                (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-              this.isUploading = true;
-            },
-            (error) => {
-              console.error("Upload error:", error);
-              this.showToast("Upload failed: " + error.message, "error");
-              this.isUploading = false;
-            },
-            async () => {
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-              this.profile.cvUrl = downloadURL;
-              this.isUploading = false;
-              this.showToast("CV uploaded successfully!", "success");
+          this.isUploading = true;
+          this.uploadProgress = 0;
+
+          try {
+            // ✅ Step 1: Delete ALL files in cvs/{uid}/
+            const listResult = await listAll(userFolderRef);
+            for (const itemRef of listResult.items) {
+              await deleteObject(itemRef);
+              console.log("Deleted old CV:", itemRef.fullPath);
             }
-          );
+
+            // ✅ Step 2: Upload new file
+            const uploadTask = uploadBytesResumable(storageRef, file);
+
+            uploadTask.on(
+              "state_changed",
+              (snapshot) => {
+                this.uploadProgress =
+                  (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
+              },
+              (error) => {
+                console.error("Upload error:", error);
+                this.showToast("Upload failed: " + error.message, "error");
+                this.isUploading = false;
+              },
+              async () => {
+                try {
+                  const downloadURL = await getDownloadURL(
+                    uploadTask.snapshot.ref
+                  );
+                  this.profile.cvUrl = downloadURL;
+
+                  // ✅ Step 3: Update Firestore profile
+                  await updateDoc(doc(db, "users", uid), {
+                    cvUrl: downloadURL,
+                  });
+
+                  this.showToast("CV uploaded successfully!", "success");
+                } catch (error) {
+                  console.error(
+                    "Error getting download URL or updating profile:",
+                    error
+                  );
+                  this.showToast(
+                    "Upload completed, but failed to update profile: " +
+                      error.message,
+                    "error"
+                  );
+                } finally {
+                  this.isUploading = false;
+                }
+              }
+            );
+          } catch (error) {
+            console.error("Error uploading CV:", error);
+            this.showToast("CV upload failed: " + error.message, "error");
+            this.isUploading = false;
+          }
         },
 
         // Save user profile
@@ -815,7 +857,7 @@
           }
         },
 
-        // Fetch all stints for job seekers with improved error handling
+        // Fetch all stints for job seekers, excluding ones they've already applied for
         async fetchAllStints() {
           if (!this.user || this.accountType !== "jobseeker") {
             console.error(
@@ -826,26 +868,40 @@
 
           this.loading = true;
           try {
-            const q = query(
+            // Step 1: Fetch all applications made by this user
+            const appsQuery = query(
+              collection(db, "applications"),
+              where("userId", "==", this.user.uid)
+            );
+            const appsSnapshot = await getDocs(appsQuery);
+            const appliedStintIds = new Set();
+            appsSnapshot.forEach((doc) => {
+              const app = doc.data();
+              if (app.stintId) appliedStintIds.add(app.stintId);
+            });
+
+            // Step 2: Fetch all active stints
+            const stintsQuery = query(
               collection(db, "stints"),
               where("status", "==", "active"),
               orderBy("postedAt", "desc")
             );
+            const stintsSnapshot = await getDocs(stintsQuery);
 
-            const querySnapshot = await getDocs(q);
+            // Step 3: Filter out already applied stints
             this.stints = [];
-
-            querySnapshot.forEach((doc) => {
-              this.stints.push({
-                id: doc.id,
-                ...doc.data(),
-              });
+            stintsSnapshot.forEach((doc) => {
+              if (!appliedStintIds.has(doc.id)) {
+                this.stints.push({ id: doc.id, ...doc.data() });
+              }
             });
-            console.log("Successfully fetched stints:", this.stints.length);
+
+            console.log(
+              "Available stints after filtering:",
+              this.stints.length
+            );
           } catch (error) {
             console.error("Error fetching stints:", error);
-
-            // If it's a permissions error, show a more helpful message
             if (error.message.includes("permission")) {
               this.showToast(
                 "Permission denied. Please check Firestore rules.",
@@ -898,6 +954,8 @@
 
             await addDoc(collection(db, "applications"), applicationData);
             this.showToast("Application submitted successfully!", "success");
+            // ✅ Refresh available stints to remove the one just applied for
+            await this.fetchAllStints();
           } catch (error) {
             console.error("Error applying for stint:", error);
             this.showToast(
