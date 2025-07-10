@@ -11,6 +11,8 @@ service cloud.firestore {
     // Business profile rules
     match /businesses/{businessId} {
       allow read, write: if request.auth != null && request.auth.uid == businessId;
+      allow read, write, update, delete: if request.auth != null &&
+    exists(/databases/$(database)/documents/admins/$(request.auth.uid));
     }
 
     // Admins collection (read-only access for checking admin status)
@@ -26,10 +28,17 @@ service cloud.firestore {
 
     // Application collection
     match /applications/{appId} {
-      allow read: if request.auth != null && request.auth.uid == resource.data.userId;
-      allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
-      allow update: if request.auth != null && request.auth.uid == resource.data.userId;
-    }
+  // Allow applicant to read/update/delete their own application
+  allow read, update, delete: if request.auth != null && request.auth.uid == resource.data.userId;
+
+  // Allow creating a new application if the user is the one applying
+  allow create: if request.auth != null && request.auth.uid == request.resource.data.userId;
+
+  // Allow businesses to read/update/delete applications to their own stints
+  allow read, update, delete: if request.auth != null &&
+    get(/databases/$(database)/documents/stints/$(resource.data.stintId)).data.businessId == request.auth.uid;
+}
+
 
   }
 }

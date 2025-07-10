@@ -23,6 +23,7 @@
         doc,
         setDoc,
         getDoc,
+        deleteDoc,
         collection,
         addDoc,
         query,
@@ -30,6 +31,7 @@
         getDocs,
         orderBy,
         updateDoc,
+        writeBatch,
       } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-firestore.js";
       import {
         getStorage,
@@ -532,6 +534,21 @@
           }
 
           console.log("Fetching user data for:", this.user.uid);
+
+          // ✅ Step 1: Check if user is an admin
+          try {
+            const adminDoc = await getDoc(doc(db, "admins", this.user.uid));
+            if (adminDoc.exists()) {
+              this.isAdmin = true;
+              this.accountType = "admin";
+              this.userProfile = adminDoc.data();
+              this.showToast("Admin access granted", "success");
+              return; // ✅ Stop here — don't create a user profile
+            }
+          } catch (e) {
+            console.warn("Admin check failed:", e);
+          }
+
           try {
             // First check if user exists in businesses collection
             let docRef = doc(db, "businesses", this.user.uid);
@@ -733,19 +750,40 @@
             const businessData = {
               ...this.business,
               uid: this.user.uid,
-              email: this.user.email || "", // Add null check
+              email: this.user.email || "",
               accountType: "business",
               updatedAt: new Date().toISOString(),
             };
 
-            // Don't overwrite verification status
             delete businessData.verified;
 
             await setDoc(doc(db, "businesses", this.user.uid), businessData, {
               merge: true,
             });
             this.userProfile = { ...this.userProfile, ...businessData };
+
             this.showToast("Business profile saved successfully!", "success");
+
+            // ✅ Update all posted stints with new business info
+            const q = query(
+              collection(db, "stints"),
+              where("businessId", "==", this.user.uid)
+            );
+            const snap = await getDocs(q);
+            const batch = writeBatch(db);
+
+            snap.forEach((docRef) => {
+              batch.update(doc(db, "stints", docRef.id), {
+                businessName: this.business.companyName,
+                businessEmail: this.business.contactEmail,
+                businessPhone: this.business.contactPhone,
+                businessLocation: this.business.location,
+                updatedAt: new Date().toISOString(),
+              });
+            });
+
+            await batch.commit();
+            console.log("Stints updated with latest business info");
           } catch (error) {
             console.error("Error saving business profile:", error);
             this.showToast(
@@ -771,6 +809,26 @@
               "warning"
             );
             return;
+          }
+
+          const requiredFields = [
+            "title",
+            "description",
+            "requirements",
+            "location",
+            "payment",
+            "duration",
+            "startDate",
+          ];
+          for (const field of requiredFields) {
+            if (!this.newStint[field]) {
+              if (field == "startDate") {
+                this.showToast(`Start Date is required`, "warning");
+                return;
+              }
+              this.showToast(`${field} is required`, "warning");
+              return;
+            }
           }
 
           this.loading = true;
@@ -806,6 +864,32 @@
             this.loading = false;
           }
         },
+
+        async deleteStint(stintId) {
+  if (!confirm("Delete this stint and all its applications?")) return;
+
+  try {
+    // Delete all applications related to this stint
+    const q = query(collection(db, "applications"), where("stintId", "==", stintId));
+    const snapshot = await getDocs(q);
+    const batch = writeBatch(db);
+
+    snapshot.forEach(docSnap => {
+      batch.delete(doc(db, "applications", docSnap.id));
+    });
+
+    // Delete the stint
+    batch.delete(doc(db, "stints", stintId));
+    await batch.commit();
+
+    this.showToast("Stint and associated applications deleted", "success");
+    await this.fetchBusinessStints();
+    await this.fetchBusinessApplications(); // Optional refresh
+  } catch (error) {
+    console.error("Error deleting stint:", error);
+    this.showToast("Failed to delete stint", "error");
+  }
+},
 
         // Fetch stints posted by this business
         async fetchBusinessStints() {
@@ -856,6 +940,42 @@
             this.loading = false;
           }
         },
+
+        async fetchBusinessApplications() {
+  if (!this.user || this.accountType !== 'business') return;
+
+  try {
+    const stintIds = this.stints.map(s => s.id);
+    if (!stintIds.length) return;
+
+    const appsQuery = query(
+      collection(db, "applications"),
+      where("stintId", "in", stintIds)
+    );
+
+    const appsSnap = await getDocs(appsQuery);
+    this.applications = appsSnap.docs.map(doc => ({
+      id: doc.id,
+      ...doc.data()
+    }));
+  } catch (error) {
+    console.error("Error fetching applications:", error);
+    this.showToast("Failed to fetch applications", "error");
+  }
+},
+
+async deleteApplication(appId) {
+  try {
+    if (!confirm("Delete this application?")) return;
+    await deleteDoc(doc(db, "applications", appId));
+    this.applications = this.applications.filter(a => a.id !== appId);
+    this.showToast("Application deleted", "success");
+  } catch (error) {
+    console.error("Delete failed:", error);
+    this.showToast("Failed to delete", "error");
+  }
+},
+
 
         // Fetch all stints for job seekers, excluding ones they've already applied for
         async fetchAllStints() {
@@ -967,6 +1087,39 @@
           }
         },
 
+        async fetchUserApplications() {
+  if (!this.user || this.accountType !== "jobseeker") return;
+
+  try {
+    const q = query(
+      collection(db, "applications"),
+      where("userId", "==", this.user.uid)
+    );
+    const querySnapshot = await getDocs(q);
+
+    this.applications = [];
+
+    for (const docSnap of querySnapshot.docs) {
+      const app = { id: docSnap.id, ...docSnap.data() };
+
+      // Fetch the associated stint title
+      try {
+        const stintRef = doc(db, "stints", app.stintId);
+        const stintSnap = await getDoc(stintRef);
+        app.stintTitle = stintSnap.exists() ? stintSnap.data().title : "(Deleted Stint)";
+      } catch (e) {
+        console.warn("Failed to fetch stint for application:", app.stintId);
+        app.stintTitle = "(Unknown)";
+      }
+
+      this.applications.push(app);
+    }
+  } catch (error) {
+    console.error("Error fetching user applications:", error);
+    this.showToast("Failed to load your applications", "error");
+  }
+},
+
         // Switch tabs
         switchTab(tab) {
           this.activeTab = tab;
@@ -977,6 +1130,10 @@
             this.fetchAllStints();
           } else if (tab === "admin" && this.isAdmin) {
             this.fetchPendingBusinesses();
+          } else if (tab === "applications" && this.accountType === "business") {
+            this.fetchBusinessApplications();
+          } else if (tab === "applications" && this.accountType === "jobseeker") {
+            this.fetchUserApplications();
           }
         },
 
@@ -1703,6 +1860,21 @@
         animation: spin 1s ease-in-out infinite;
       }
 
+      .btn-delete {
+        background-color: #dc3545;
+        color: #fff;
+        border: none;
+        padding: 6px 12px;
+        font-size: 0.9rem;
+        border-radius: 4px;
+        cursor: pointer;
+        transition: background-color 0.2s ease-in-out;
+      }
+
+      .btn-delete:hover {
+        background-color: #b02a37;
+      }
+
       @keyframes spin {
         to {
           transform: rotate(360deg);
@@ -2172,6 +2344,12 @@ Business Data: {{ accountType === 'business' ? JSON.stringify(business, null, 2)
             {{ accountType === 'business' ? 'My Stints' : 'Available Stints' }}
           </button>
           <button
+            @click="switchTab('applications')"
+            class="tab-button"
+            :class="{ active: activeTab === 'applications' }"
+          >
+          {{ accountType === 'business' ? 'Applications' : 'Applications' }}
+          <button
             v-if="isAdmin"
             @click="switchTab('admin')"
             class="tab-button"
@@ -2373,6 +2551,28 @@ Business Data: {{ accountType === 'business' ? JSON.stringify(business, null, 2)
           </div>
         </div>
 
+        <!-- Applications tab (business only) -->
+<div v-if="activeTab === 'applications' && accountType === 'business'">
+  <h2>Applications</h2>
+
+  <div v-for="stint in stints" :key="stint.id" class="card mb-3">
+    <h4>{{ stint.title }}</h4>
+
+    <div v-for="app in applications.filter(a => a.stintId === stint.id)" :key="app.id" class="card mb-2">
+      <p><strong>Name:</strong> {{ app.userName }}</p>
+      <p><strong>Email:</strong> {{ app.userEmail }}</p>
+      <p><strong>Phone:</strong> 
+        <a :href="`tel:${app.userPhone}`">{{ app.userPhone || 'N/A' }}</a>
+      </p>
+      <p><strong>Status:</strong> {{ app.status }}</p>
+
+      <a v-if="app.cvUrl" :href="app.cvUrl" target="_blank" class="btn btn-outline">View CV</a>
+      <button @click="deleteApplication(app.id)" class="btn-delete">Delete</button>
+    </div>
+  </div>
+</div>
+
+
         <!-- Stints Tab -->
         <div v-if="activeTab === 'stints'">
           <!-- For Businesses: Post New Stint + List of Posted Stints -->
@@ -2562,6 +2762,9 @@ Business Data: {{ accountType === 'business' ? JSON.stringify(business, null, 2)
                 <div v-if="stint.requirements" class="mb-2">
                   <strong>Requirements:</strong> {{ stint.requirements }}
                 </div>
+                <button class="btn-delete" @click="deleteStint(stint.id)">
+                  Delete
+                </button>
               </div>
             </div>
           </div>
@@ -2633,6 +2836,16 @@ Business Data: {{ accountType === 'business' ? JSON.stringify(business, null, 2)
           </div>
         </div>
 
+        <!-- Applications Tab -->
+        <div v-if="activeTab === 'applications' && accountType === 'jobseeker'">
+          <h3>Your Applications</h3>
+          <div v-for="app in applications" class="card">
+            <p><strong>Stint:</strong> {{ app.stintTitle }}</p>
+            <p><strong>Status:</strong> {{ app.status }}</p>
+            <button class="btn-delete" @click="deleteApplication(app.id)">Delete Application</button>
+          </div>
+        </div>
+        
         <!-- Admin Panel Tab -->
         <div v-if="activeTab === 'admin' && isAdmin">
           <div class="card">
