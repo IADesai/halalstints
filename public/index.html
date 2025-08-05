@@ -1253,6 +1253,26 @@ async deleteApplication(appId) {
         overscroll-behavior-y: none;
       }
 
+      .app-footer {
+        position: fixed;
+        bottom: 15px;
+        left: 50%;
+        transform: translateX(-50%);
+        font-size: 14px;
+        color: #666;
+        text-align: center;
+      }
+
+      .app-footer a {
+        color: #28a745; /* Match your green theme */
+        text-decoration: none;
+        margin: 0 5px;
+      }
+
+      .app-footer a:hover {
+        text-decoration: underline;
+      }
+
       .container {
         max-width: 1200px;
         margin: 0 auto;
@@ -2218,6 +2238,10 @@ async deleteApplication(appId) {
             {{ isSignUp ? signUpError : loginError }}
           </div>
 
+          <p class="text-center" style="margin-bottom: 10px;">
+            {{ isSignUp ? 'By signing up, you confirm you agree to our privacy statement, and terms of service as below.' : '' }}
+          </p>
+
           <!-- Submit Button -->
           <button
             type="submit"
@@ -2913,6 +2937,10 @@ Business Data: {{ accountType === 'business' ? JSON.stringify(business, null, 2)
         </div>
       </div>
     </div>
+    <footer class="app-footer">
+  <a href="privacy.html" target="_blank">Privacy Statement</a> |
+  <a href="terms.html" target="_blank">Terms of Service</a>
+</footer>
   </body>
   <!-- Add this script to the end of your body tag -->
   <script>
