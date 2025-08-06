@@ -15,6 +15,7 @@
         getAuth,
         onAuthStateChanged,
         createUserWithEmailAndPassword,
+        sendPasswordResetEmail,
         signInWithEmailAndPassword,
         signOut,
       } from "https://www.gstatic.com/firebasejs/9.22.2/firebase-auth.js";
@@ -71,6 +72,11 @@
         accountType: "jobseeker", // "jobseeker" or "business"
         loginError: "",
         signUpError: "",
+        showPasswordResetModal: false,
+        resetEmail: "",
+        resetLoading: false,
+        passwordResetSuccess: false,
+        passwordResetError: '',
 
         // UI state
         activeTab: "profile", // "profile", "stints", "applications"
@@ -419,16 +425,52 @@
             this.loading = false;
           }
         },
+        
+        // Close password reset modal
+closePasswordResetModal() {
+    this.showPasswordResetModal = false;
+    this.resetEmail = "";
+    this.resetLoading = false;
+    this.passwordResetSuccess = false;
+    this.passwordResetError = ''; // Clear password reset errors
+},
 
-        // Logout method
-        async logoutUser() {
-          try {
-            await signOut(auth);
-            this.resetState();
-          } catch (error) {
-            console.error("Logout failed:", error.message);
-          }
-        },
+// Send password reset email
+async sendPasswordReset() {
+    if (!this.resetEmail || this.resetLoading) return;
+
+    this.resetLoading = true;
+    this.passwordResetError = ''; // Clear previous errors
+    
+    try {
+        await sendPasswordResetEmail(auth, this.resetEmail);
+        
+        this.passwordResetSuccess = true;
+        this.showToast("Password reset email sent successfully!", "success");
+    } catch (error) {
+        console.error("Password reset error:", error);
+        
+        let errorMessage = "Failed to send password reset email.";
+        
+        switch (error.code) {
+            case 'auth/user-not-found':
+                errorMessage = "No account found with this email address.";
+                break;
+            case 'auth/invalid-email':
+                errorMessage = "Please enter a valid email address.";
+                break;
+            case 'auth/too-many-requests':
+                errorMessage = "Too many requests. Please try again later.";
+                break;
+        }
+        
+        // Set the error to display in modal AND show toast
+        this.passwordResetError = errorMessage;
+        this.showToast(errorMessage, "error");
+    } finally {
+        this.resetLoading = false;
+    }
+},
 
         // Check if user is admin
         async checkAdminStatus() {
@@ -525,6 +567,16 @@
             this.loading = false;
           }
         },
+
+        // Logout method
+        async logoutUser() {
+          try {
+            await signOut(auth);
+            this.resetState();
+            } catch (error) {
+            console.error("Logout failed:", error.message);
+            }
+          },
 
         // Fetch user data from Firestore with better error handling and null checks
         async fetchUserData() {
@@ -1188,7 +1240,7 @@ async deleteApplication(appId) {
 
     <!-- Add this to your head section -->
     <link rel="manifest" href="manifest.json" />
-    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
     <meta
       name="apple-mobile-web-app-status-bar-style"
       content="black-translucent"
@@ -1253,9 +1305,295 @@ async deleteApplication(appId) {
         overscroll-behavior-y: none;
       }
 
+      .account-delete-card {
+        background: #fff3f3;
+        border: 1px solid #f5c2c7;
+        padding: 16px;
+        margin-top: 20px;
+        border-radius: 6px;
+      }
+
+      .delete-btn {
+        background-color: #dc3545; /* Bootstrap red */
+        color: #fff;
+        padding: 10px 20px;
+        border: none;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 14px;
+        font-weight: bold;
+        transition: background-color 0.2s ease-in-out;
+      }
+
+      .password-reset-modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background-color: rgba(0, 0, 0, 0.5);
+            z-index: 1000;
+            backdrop-filter: blur(4px);
+        }
+
+        .password-reset-modal.show {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            animation: fadeIn 0.3s ease-out;
+        }
+
+        .password-reset-content {
+            background: white;
+            border-radius: 12px;
+            padding: 2rem;
+            width: 90%;
+            max-width: 400px;
+            box-shadow: 0 20px 40px rgba(0, 0, 0, 0.1);
+            animation: slideUp 0.3s ease-out;
+            position: relative;
+        }
+
+        .dark-mode .password-reset-content {
+            background: #1f2937;
+            color: white;
+        }
+
+        .password-reset-header {
+            text-align: center;
+            margin-bottom: 1.5rem;
+        }
+
+        .password-reset-header h3 {
+            margin: 0 0 0.5rem 0;
+            font-size: 1.5rem;
+            font-weight: 600;
+            color: #1f2937;
+        }
+
+        .dark-mode .password-reset-header h3 {
+            color: white;
+        }
+
+        .password-reset-header p {
+            margin: 0;
+            color: #6b7280;
+            font-size: 0.9rem;
+            line-height: 1.5;
+        }
+
+        .dark-mode .password-reset-header p {
+            color: #9ca3af;
+        }
+
+        .password-reset-form {
+            margin-bottom: 1.5rem;
+        }
+
+        .password-reset-input {
+            width: 100%;
+            padding: 0.75rem;
+            border: 2px solid #e5e7eb;
+            border-radius: 8px;
+            font-size: 1rem;
+            transition: all 0.2s ease;
+            box-sizing: border-box;
+        }
+
+        .password-reset-input:focus {
+            outline: none;
+            border-color: #3b82f6;
+            box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+        }
+
+        .dark-mode .password-reset-input {
+            background: #374151;
+            border-color: #4b5563;
+            color: white;
+        }
+
+        .dark-mode .password-reset-input:focus {
+            border-color: #60a5fa;
+            box-shadow: 0 0 0 3px rgba(96, 165, 250, 0.1);
+        }
+
+        .password-reset-buttons {
+            display: flex;
+            gap: 0.75rem;
+            justify-content: flex-end;
+        }
+
+        .password-reset-btn {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.9rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            min-width: 80px;
+        }
+
+        .password-reset-btn-cancel {
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .password-reset-btn-cancel:hover {
+            background: #e5e7eb;
+        }
+
+        .dark-mode .password-reset-btn-cancel {
+            background: #4b5563;
+            color: #d1d5db;
+        }
+
+        .dark-mode .password-reset-btn-cancel:hover {
+            background: #6b7280;
+        }
+
+        .password-reset-btn-send {
+            background: #3b82f6;
+            color: white;
+        }
+
+        .password-reset-btn-send:hover {
+            background: #2563eb;
+        }
+
+        .password-reset-btn-send:disabled {
+            background: #9ca3af;
+            cursor: not-allowed;
+        }
+
+        .password-reset-close {
+            position: absolute;
+            top: 1rem;
+            right: 1rem;
+            background: none;
+            border: none;
+            font-size: 1.5rem;
+            cursor: pointer;
+            color: #6b7280;
+            padding: 0.25rem;
+            border-radius: 4px;
+            transition: all 0.2s ease;
+        }
+
+        .password-reset-close:hover {
+            background: #f3f4f6;
+            color: #374151;
+        }
+
+        .dark-mode .password-reset-close {
+            color: #9ca3af;
+        }
+
+        .dark-mode .password-reset-close:hover {
+            background: #4b5563;
+            color: #d1d5db;
+        }
+
+        /* Forgot Password Link Styles */
+        .forgot-password-link {
+            margin-top: 1rem;
+            color: #3b82f6;
+            text-decoration: none;
+            font-size: 0.9rem;
+            font-weight: 500;
+            transition: color 0.2s ease;
+            text-align: center;
+        }
+
+        .forgot-password-link:hover {
+            color: #2563eb;
+            text-decoration: underline;
+        }
+
+        .dark-mode .forgot-password-link {
+            color: #60a5fa;
+        }
+
+        .dark-mode .forgot-password-link:hover {
+            color: #93c5fd;
+        }
+
+        /* Animation keyframes */
+        @keyframes fadeIn {
+            from {
+                opacity: 0;
+            }
+            to {
+                opacity: 1;
+            }
+        }
+
+        @keyframes slideUp {
+            from {
+                opacity: 0;
+                transform: translateY(20px);
+            }
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        /* Loading state */
+        .password-reset-btn-send.loading {
+            position: relative;
+            color: transparent;
+        }
+
+        .password-reset-btn-send.loading::after {
+            content: '';
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 16px;
+            height: 16px;
+            border: 2px solid rgba(255, 255, 255, 0.3);
+            border-top: 2px solid white;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: translate(-50%, -50%) rotate(360deg);
+            }
+        }
+
+        /* Success message styles */
+        .password-reset-success {
+            background: #dcfce7;
+            border: 1px solid #bbf7d0;
+            color: #166534;
+            padding: 0.75rem;
+            border-radius: 8px;
+            margin-bottom: 1rem;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+
+        .dark-mode .password-reset-success {
+            background: #064e3b;
+            border-color: #065f46;
+            color: #6ee7b7;
+        }
+      
+      .delete-btn:hover {
+        background-color: #b02a37;
+      }
+
+      .login-form-footer {
+        text-align: center;
+      }
+
       .app-footer {
-        position: fixed;
-        bottom: 15px;
+        position: relative;
         left: 50%;
         transform: translateX(-50%);
         font-size: 14px;
@@ -2220,9 +2558,7 @@ async deleteApplication(appId) {
 
           <!-- Confirm Password (Sign-Up only) -->
           <div v-if="isSignUp" class="form-group">
-            <label for="confirmPassword" class="form-label"
-              >Confirm Password</label
-            >
+            <label for="confirmPassword" class="form-label">Confirm Password</label>
             <input
               type="password"
               id="confirmPassword"
@@ -2236,6 +2572,12 @@ async deleteApplication(appId) {
           <!-- Error Messages -->
           <div v-if="loginError || signUpError" class="text-danger mb-3">
             {{ isSignUp ? signUpError : loginError }}
+          </div>
+
+          <div class="login-form-footer">
+            <a href="#" class="forgot-password-link" @click.prevent="showPasswordResetModal = true">
+              {{ isSignUp ? '' : 'Forgot your password?' }}
+            </a>
           </div>
 
           <p class="text-center" style="margin-bottom: 10px;">
@@ -2252,6 +2594,69 @@ async deleteApplication(appId) {
             {{ isSignUp ? 'Create Account' : 'Login' }}
           </button>
         </form>
+
+        <!-- Password Reset Modal -->
+        <div class="password-reset-modal" :class="{ show: showPasswordResetModal }" @click.self="closePasswordResetModal">
+          <div class="password-reset-content">
+            <button class="password-reset-close" @click="closePasswordResetModal">&times;</button>
+            
+            <div class="password-reset-header">
+              <h3>Reset Password</h3>
+              <p>Enter your email address and we'll send you a link to reset your password.</p>
+            </div>
+
+            <!-- Error display -->
+            <div v-if="passwordResetError" class="text-danger mb-3">
+              {{ passwordResetError }}
+            </div>
+
+            <div v-if="passwordResetSuccess" class="password-reset-success">
+              Password reset email sent! Check your inbox and spam folder.
+            </div>
+
+            <!-- CRITICAL FIX: Only render form when modal is actually shown -->
+            <form v-if="showPasswordResetModal && !passwordResetSuccess" class="password-reset-form" @submit.prevent="sendPasswordReset">
+              <input 
+                type="email" 
+                class="password-reset-input"
+                placeholder="Enter your email address"
+                v-model="resetEmail"
+                required
+                :disabled="resetLoading"
+              >
+            </form>
+
+            <div class="password-reset-buttons" v-if="!passwordResetSuccess">
+              <button 
+                type="button" 
+                class="password-reset-btn password-reset-btn-cancel"
+                @click="closePasswordResetModal"
+                :disabled="resetLoading"
+              >
+                Cancel
+              </button>
+              <button 
+                type="button"
+                class="password-reset-btn password-reset-btn-send"
+                :class="{ loading: resetLoading }"
+                @click="sendPasswordReset"
+                :disabled="resetLoading || !resetEmail"
+              >
+                Send Reset Link
+              </button>
+            </div>
+
+            <div class="password-reset-buttons" v-if="passwordResetSuccess">
+              <button 
+                type="button" 
+                class="password-reset-btn password-reset-btn-send"
+                @click="closePasswordResetModal"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
 
       <!-- Logged-In Section -->
@@ -2472,6 +2877,11 @@ Business Data: {{ accountType === 'business' ? JSON.stringify(business, null, 2)
                     Save Profile
                   </button>
                 </div>
+                <div class="card mt-4 account-delete-card">
+                    <h4>Account Actions</h4>
+                    <p>If you delete your account, all your data (CVs, stints, applications) will be permanently deleted.</p>
+                    <button class="delete-btn" @click="deleteAccount">Delete My Account</button>
+                </div>
               </form>
             </div>
           </div>
@@ -2561,7 +2971,6 @@ Business Data: {{ accountType === 'business' ? JSON.stringify(business, null, 2)
                     v-model="business.contactPhone"
                   />
                 </div>
-
                 <button
                   type="submit"
                   class="btn btn-primary"
@@ -2571,6 +2980,11 @@ Business Data: {{ accountType === 'business' ? JSON.stringify(business, null, 2)
                   Save Business Profile
                 </button>
               </form>
+              <div class="card mt-4 account-delete-card">
+                    <h4>Account Actions</h4>
+                    <p>If you delete your account, all your data (CVs, stints, applications) will be permanently deleted.</p>
+                    <button class="delete-btn" @click="deleteAccount">Delete My Account</button>
+              </div>
             </div>
           </div>
         </div>
