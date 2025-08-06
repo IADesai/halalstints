@@ -430,47 +430,70 @@
 closePasswordResetModal() {
     this.showPasswordResetModal = false;
     this.resetEmail = "";
-    this.resetLoading = false;
     this.passwordResetSuccess = false;
     this.passwordResetError = ''; // Clear password reset errors
 },
 
 // Send password reset email
-async sendPasswordReset() {
-    if (!this.resetEmail || this.resetLoading) return;
-
-    this.resetLoading = true;
-    this.passwordResetError = ''; // Clear previous errors
-    
-    try {
+    async sendPasswordReset() {
+      if (!this.resetEmail || this.resetLoading) return;
+      this.resetLoading = true;
+      this.passwordResetError = ''; // Clear previous errors
+      
+      try {
         await sendPasswordResetEmail(auth, this.resetEmail);
         
         this.passwordResetSuccess = true;
         this.showToast("Password reset email sent successfully!", "success");
-    } catch (error) {
+      } catch (error) {
         console.error("Password reset error:", error);
         
         let errorMessage = "Failed to send password reset email.";
         
         switch (error.code) {
-            case 'auth/user-not-found':
-                errorMessage = "No account found with this email address.";
-                break;
-            case 'auth/invalid-email':
-                errorMessage = "Please enter a valid email address.";
-                break;
-            case 'auth/too-many-requests':
-                errorMessage = "Too many requests. Please try again later.";
-                break;
+          case 'auth/user-not-found':
+            errorMessage = "No account found with this email address.";
+            break;
+          case 'auth/invalid-email':
+            errorMessage = "Please enter a valid email address.";
+            break;
+          case 'auth/too-many-requests':
+            errorMessage = "Too many requests. Please try again later.";
+            break;
         }
         
         // Set the error to display in modal AND show toast
         this.passwordResetError = errorMessage;
         this.showToast(errorMessage, "error");
-    } finally {
+      } finally {
         this.resetLoading = false;
-    }
-},
+      }
+    },
+    
+    // Close password reset modal
+    closePasswordResetModal() {
+      this.showPasswordResetModal = false;
+      // Reset modal state
+      this.resetEmail = '';
+      this.passwordResetError = '';
+      this.passwordResetSuccess = false;
+    },
+    
+    // Check if user is admin
+    async checkAdminStatus() {
+      if (!this.user) {
+        this.isAdmin = false;
+        return;
+      }
+      try {
+        const adminRef = doc(db, "admins", this.user.uid);
+        const adminDoc = await getDoc(adminRef);
+        this.isAdmin = adminDoc.exists();
+      } catch (error) {
+        console.error("Error checking admin status:", error);
+        this.isAdmin = false;
+      }
+    },
 
         // Check if user is admin
         async checkAdminStatus() {
@@ -1229,7 +1252,7 @@ async deleteApplication(appId) {
         },
       });
 
-      appInstance.mount();
+      appInstance.mount('body');
     </script>
 
     <script src="https://cdn.jsdelivr.net/npm/petite-vue@latest"></script>
@@ -2596,68 +2619,44 @@ async deleteApplication(appId) {
         </form>
 
         <!-- Password Reset Modal -->
-        <div class="password-reset-modal" :class="{ show: showPasswordResetModal }" @click.self="closePasswordResetModal">
-          <div class="password-reset-content">
-            <button class="password-reset-close" @click="closePasswordResetModal">&times;</button>
-            
-            <div class="password-reset-header">
-              <h3>Reset Password</h3>
-              <p>Enter your email address and we'll send you a link to reset your password.</p>
-            </div>
-
-            <!-- Error display -->
-            <div v-if="passwordResetError" class="text-danger mb-3">
-              {{ passwordResetError }}
-            </div>
-
-            <div v-if="passwordResetSuccess" class="password-reset-success">
-              Password reset email sent! Check your inbox and spam folder.
-            </div>
-
-            <!-- CRITICAL FIX: Only render form when modal is actually shown -->
-            <form v-if="showPasswordResetModal && !passwordResetSuccess" class="password-reset-form" @submit.prevent="sendPasswordReset">
-              <input 
-                type="email" 
-                class="password-reset-input"
-                placeholder="Enter your email address"
-                v-model="resetEmail"
-                required
-                :disabled="resetLoading"
-              >
-            </form>
-
-            <div class="password-reset-buttons" v-if="!passwordResetSuccess">
-              <button 
-                type="button" 
-                class="password-reset-btn password-reset-btn-cancel"
-                @click="closePasswordResetModal"
-                :disabled="resetLoading"
-              >
-                Cancel
-              </button>
-              <button 
-                type="button"
-                class="password-reset-btn password-reset-btn-send"
-                :class="{ loading: resetLoading }"
-                @click="sendPasswordReset"
-                :disabled="resetLoading || !resetEmail"
-              >
-                Send Reset Link
-              </button>
-            </div>
-
-            <div class="password-reset-buttons" v-if="passwordResetSuccess">
-              <button 
-                type="button" 
-                class="password-reset-btn password-reset-btn-send"
-                @click="closePasswordResetModal"
-              >
-                Close
-              </button>
-            </div>
-          </div>
-        </div>
+  <div 
+    class="password-reset-modal" 
+    :class="{ show: showPasswordResetModal }" 
+    @click.self="closePasswordResetModal"
+  >
+    <div class="password-reset-content">
+      <button class="password-reset-close" @click="closePasswordResetModal">&times;</button>
+      <h3>Reset Password</h3>
+      <p>Enter your email address and we'll send you a link to reset your password.</p>
+      
+      <div v-if="passwordResetError" class="text-danger mb-3">{{ passwordResetError }}</div>
+      <div v-if="passwordResetSuccess" class="password-reset-success">
+        Password reset email sent! Check your inbox.
       </div>
+      
+      <form v-if="showPasswordResetModal && !passwordResetSuccess" 
+            class="password-reset-form"
+            @submit.prevent="sendPasswordReset">
+        <input type="email" v-model="resetEmail" class="password-reset-input"
+               placeholder="Enter your email address" required :disabled="resetLoading" />
+        <div class="password-reset-buttons">
+          <button type="button" @click="closePasswordResetModal"
+                  class="password-reset-btn password-reset-btn-cancel"
+                  :disabled="resetLoading">Cancel</button>
+          <button type="submit" class="password-reset-btn password-reset-btn-send"
+                  :disabled="resetLoading || !resetEmail">
+            {{ resetLoading ? 'Sending...' : 'Send Reset Link' }}
+          </button>
+        </div>
+      </form>
+      
+      <div v-if="passwordResetSuccess" class="password-reset-buttons">
+        <button type="button" class="password-reset-btn password-reset-btn-send"
+                @click="closePasswordResetModal">Close</button>
+      </div>
+    </div>
+  </div>
+  </div>
 
       <!-- Logged-In Section -->
       <div v-else>
